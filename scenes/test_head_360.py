@@ -13,7 +13,7 @@ if __name__ == '__main__':
         client_id = -1
     e = vrep.simxStopSimulation(client_id, vrep.simx_opmode_oneshot_wait)
     vrep.simxFinish(-1)
-    client_id = vrep.simxStart('10.200.6.49', 19999, True, True, 5000, 5)
+    client_id = vrep.simxStart('127.0.0.1', 19997, True, True, 5000, 5)
 
     assert client_id != -1, 'Failed connecting to remote API server'
 
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     e, neck_pos = vrep.simxGetJointPosition(client_id, neck, vrep.simx_opmode_streaming)
 
     print "Current position = %0.3f degrees" % neck_pos
-    e = vrep.simxSetJointPosition(client_id, neck, -60, vrep.simx_opmode_streaming)
+    e = vrep.simxSetJointPosition(client_id, neck, 0.5, vrep.simx_opmode_streaming)
 
     e, neck_pos = vrep.simxGetJointPosition(client_id, neck, vrep.simx_opmode_streaming)
 
@@ -41,6 +41,7 @@ if __name__ == '__main__':
         print "setting current position as %d" % math.fmod(i,360)
 
         e = vrep.simxSetJointPosition(client_id, neck, i/180. * math.pi, vrep.simx_opmode_oneshot_wait)
+
         e, neck_pos = vrep.simxGetJointPosition(client_id, neck, vrep.simx_opmode_oneshot_wait)
 
         print "Current position = %0.3f degrees" % (neck_pos/math.pi * 180)
