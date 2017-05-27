@@ -1,3 +1,4 @@
+import logging
 import tensorflow as tf
 from keras.models import Sequential, Model
 from keras.engine.training import collect_trainable_weights
@@ -7,8 +8,8 @@ from heraspy import *
 import matplotlib.pyplot as plt
 
 # Learns an embedding function f:SxG->Z
-# |S|<=20, |G|<= 20
-# Try 10-dim Z-space for embedding
+# |S|~20, |G|~20
+# Try 20-dim Z-space for embedding
 class EmbeddingLearner(object):
     # inp_size = Nx(S+G)
     # emd_size = NxZ
@@ -19,7 +20,7 @@ class EmbeddingLearner(object):
         self.embedding_size = args['emb_size']
         self.batch_size = args['batch_size']
         self.learning_rate = args['learning_rate']
-        self.idx = args['thread_idx']
+        # self.idx = args['thread_idx']
 
         # init keras network
         # Build encoder from here
@@ -46,8 +47,9 @@ class EmbeddingLearner(object):
 
     # states=NxS, goals=NxG
     def fit(states, goals, val_ratio=0.05, batch_size=256):
+        logging.getLogger("learner").info("fitting")
         # Prepare heras callback
-        herasCallback = HeraCallback('embedding-learner-'+str(self.idx), 'localhost', 9990+self.idx)
+        # herasCallback = HeraCallback('embedding-learner-'+str(self.idx), 'localhost', 9990+self.idx)
 
         # Split data into val and train dataset
         indices = np.random.permutation(states.shape[0])
@@ -58,11 +60,12 @@ class EmbeddingLearner(object):
                              epochs=50,
                              batch_size=self.batch_size,
                              shuffle=True,
-                             validation_data = ([val_states, val_goals], [val_states, val_goals]),
-                             callbacks=[herasCallback])
+                             validation_data = ([val_states, val_goals], [val_states, val_goals]))
+                             # callbacks=[herasCallback])
 
 
     # states, goals = NxS, NxG
     # returns embed_matrix = NxZ
     def embed(states, goals):
+        logging.getLogger(name="learner").info("embedding")
         return self.encoder.predict([states, goals])

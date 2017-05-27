@@ -4,6 +4,7 @@ Adapted from github.com/yanpanlau
 
 import numpy as np
 import math
+import logger
 from keras.initializations import normal, identity
 from keras.models import model_from_json
 from keras.models import Sequential, Model
@@ -35,12 +36,14 @@ class ActorNetwork(object):
         self.sess.run(tf.initialize_all_variables())
 
     def train(self, states, action_grads):
+        logger.getLogger("learner").info("training actor")
         self.sess.run(self.optimize, feed_dict={
             self.state: states,
             self.action_gradient: action_grads
         })
 
     def target_train(self):
+        logging.getLogger("learner").info("actor target update")
         actor_weights = self.model.get_weights()
         actor_target_weights = self.target_model.get_weights()
         for i in xrange(len(actor_weights)):
@@ -48,7 +51,7 @@ class ActorNetwork(object):
         self.target_model.set_weights(actor_target_weights)
 
     def create_actor_network(self, state_size,action_dim):
-        print("Building Actor Network")
+        logger.getLogger("learner").info("building actor")
         S = Input(shape=[state_size])
         # HIDDEN1_UNITS=100, relu
         h0 = Dense(self.network_config['hlayer_1_size'], activation=self.network_config['hlayer_1_type'])(S)

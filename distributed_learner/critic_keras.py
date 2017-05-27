@@ -4,6 +4,7 @@ Adapted from github.com/yanpanlau
 
 import numpy as np
 import math
+import logging
 from keras.initializations import normal, identity
 from keras.models import model_from_json, load_model
 from keras.engine.training import collect_trainable_weights
@@ -37,12 +38,14 @@ class CriticNetwork(object):
         self.sess.run(tf.initialize_all_variables())
 
     def gradients(self, states, actions):
+        logging.getLogger("learner").info("getting critic gradients")
         return self.sess.run(self.action_grads, feed_dict={
             self.state: states,
             self.action: actions
         })[0]
 
     def target_update(self):
+        logging.getLogger("learner").info("critic target update")
         critic_weights = self.model.get_weights()
         critic_target_weights = self.target_model.get_weights()
         for i in xrange(len(critic_weights)):
@@ -50,7 +53,7 @@ class CriticNetwork(object):
         self.target_model.set_weights(critic_target_weights)
 
     def create_critic_network(self, state_size, action_dim):
-        print("Building Critic Network")
+        logging.getLogger("learner").info("building critic")
         S = Input(shape=[state_size])
         A = Input(shape=[action_dim],name='action2')
         # HIDDEN1_UNITS, relu
