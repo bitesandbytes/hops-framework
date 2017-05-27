@@ -28,7 +28,10 @@ class AntTurnEnv(BaseEnv):
         return self.state, self.delta_theta
 
     def _is_terminal(self, current):
-        return True if np.absolute(self._normalize(current) - self.goal) < self.tolerance else return False
+        if (np.absolute(self._normalize(current) - self.goal) < self.tolerance):
+            return True
+        else:
+            return False
 
     def step(self, action):
         logging.getLogger("learner").info("stepping")

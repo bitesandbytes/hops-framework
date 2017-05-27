@@ -37,17 +37,17 @@ class EmbeddingLearner(object):
         S2 = Dense(self.state_size, activation='relu')(S1)
         G2 = Dense(self.goal_size, activation='relu')(G1)
         # combine to form autoencoder
-        autoencoder = Model(input=[S, G], output=[S2, G2])
-        adam = Adam(lr=self.learning_rate)
-        autoencoder.compile(loss='mse', optimizer='adam')
+        self.autoencoder = Model(input=[S, G], output=[S2, G2])
+        self.adam = Adam(lr=self.learning_rate)
+        self.autoencoder.compile(loss='mse', optimizer=adam)
 
-        encoder = Model(input=[S,G], output=mid_layer)
+        self.encoder = Model(input=[S,G], output=mid_layer)
 
         K.set_session(sess)
 
     # states=NxS, goals=NxG
     def fit(states, goals, val_ratio=0.05, batch_size=256):
-        logging.getLogger("learner").info("fitting")
+        logging.getLogger("learner").info("EMB fitting")
         # Prepare heras callback
         # herasCallback = HeraCallback('embedding-learner-'+str(self.idx), 'localhost', 9990+self.idx)
 

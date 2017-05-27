@@ -214,8 +214,8 @@ if __name__=="__main__":
     # configs
     env_args = {
         'vrep_exec_path' : args.vrep_exec_path,
-        'vrep_port' = args.vrep_port_begin,
-        'vrep_scene_file' = args.vrep_scene_file,
+        'vrep_port' : args.vrep_port_begin,
+        'vrep_scene_file' : args.vrep_scene_file,
         'per_step_reward' : -0.01,
         'final_reward' : 1,
         'tolerance' :  1,
