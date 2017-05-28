@@ -13,7 +13,8 @@ from keras.models import Model
 
 class ActorNetwork(object):
     def __init__(self, args):
-        self.sess = args['sess']
+        # self.sess = args['sess']
+        self.sess = tf.Session()
         self.batch_size = args['batch_size']
         self.target_update_rate = args['target_update_rate']
         self.learning_rate = args['learning_rate']

@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import threading
 import time
 
@@ -53,18 +54,18 @@ def _learner_thread(args, thread_id, sync_nets, locks):
             pass
 
     for epoch in range(0, args['num_epochs']):
-        cur_states = np.zeros(0, args['state_size'])
-        cur_goals = np.zeros(0, args['goal_size'])
-        next_states = np.zeros(0, args['state_size'])
-        next_goals = np.zeros(0, args['goal_size'])
-        actions = np.zeros(0, args['action_size'])
-        rewards = np.zeros(0, 1)
-        is_final = np.zeros(0, 1)
+        cur_states = np.zeros((0, args['state_size']))
+        cur_goals = np.zeros((0, args['goal_size']))
+        next_states = np.zeros((0, args['state_size']))
+        next_goals = np.zeros((0, args['goal_size']))
+        actions = np.zeros((0, args['action_size']))
+        rewards = np.zeros((0, 1))
+        is_final = np.zeros((0, 1))
 
         for episode in range(0, args['num_episodes_per_epoch']):
             env.reset()
             rand_goal = np.random.uniform(-np.pi, +np.pi)
-            logger.info("starting - epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal[0]))
+            logger.info("starting - epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
             env.set_goal(rand_goal)
             # cur_goal = randomly generated starting goal
             cur_state, cur_goal = env.start()
@@ -92,7 +93,7 @@ def _learner_thread(args, thread_id, sync_nets, locks):
                 cur_state = next_state
                 cur_goal = next_goal
             logger.info(
-                "ended - epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal[0], num_steps))
+                "ended - epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
         # EMB train & update
         # train EMB
         embedder.fit(states=cur_states, goals=cur_goals)
@@ -186,40 +187,42 @@ def _learner_thread(args, thread_id, sync_nets, locks):
 
 
 if __name__ == "__main__":
+    os.chdir("../")
     # init parser
     parser = argparse.ArgumentParser(description="Parallel Asynchronous DDPG with Embedding Learner")
-    parser.add_argument("model_weights_suffix",
+    parser.add_argument("--model_weights_suffix",
                         help="stand-in for <SUFFIX> in \"actor_<SUFFIX>\" and \"critic_<SUFFIX>\"")
-    parser.add_argument("actor_learning_rate", type=float, help="learning rate for actor network")
-    parser.add_argument("critic_learning_rate", type=float, help="learning rate for critic network")
-    parser.add_argument("emb_learning_rate", type=float, help="learning rate for embedding learner network")
-    parser.add_argument("emb_size", type=int, help="embedding dimension")
-    parser.add_argument("target_network_update_rate", type=float,
+    parser.add_argument("--actor_learning_rate", type=float, help="learning rate for actor network")
+    parser.add_argument("--critic_learning_rate", type=float, help="learning rate for critic network")
+    parser.add_argument("--emb_learning_rate", type=float, help="learning rate for embedding learner network")
+    parser.add_argument("--emb_size", type=int, help="embedding dimension")
+    parser.add_argument("--target_network_update_rate", type=float,
                         help="update rate to update target networks using current networks")
-    parser.add_argument("ddpg_max_out_of_sync", type=int,
+    parser.add_argument("--ddpg_max_out_of_sync", type=int,
                         help="DDPG - no. of episodes after which updates are pushed to param server, simultaneously "
                              "reading from it")
-    parser.add_argument("emb_max_out_of_sync", type=int,
+    parser.add_argument("--emb_max_out_of_sync", type=int,
                         help="EMB - no. of episodes after which updates are pushed to param server, simultaneously "
                              "reading from it")
-    parser.add_argument("num_learners", type=int, help="no. of learning threads to use; each one also uses its own env")
-    parser.add_argument("batch_size", type=int, help="batch size for both DDPG and EMB")
-    parser.add_argument("num_epochs", type=int, help="number of training epochs")
-    parser.add_argument("num_episodes_per_epoch", type=int, help="number of episodes to run per epoch of training")
-    parser.add_argument("max_episode_length", help="max length of episode before terminatiion")
-    parser.add_argument("vrep_port_begin", type=int, help="remote port number to start V-REP simulator on")
-    parser.add_argument("vrep_scene_file", help="scene file(.ttt) for V-REP")
-    parser.add_argument("server_update_rate", type=float, help="update rate for server params")
-    parser.add_argument("save_every_x_epochs", type=int, help="number of epochs before saving params to file")
-    parser.add_argument("eval_every_x_epochs", type=int, help="number of epochs before eval model")
-    parser.add_argument("load_params", type=bool, help="loads params from file if True")
-    parser.add_argument("vrep_exec_path", help="full path for vrep.sh")
-    parser.add_argument("log_file", help="file to log to")
+    parser.add_argument("--num_learners", type=int,
+                        help="no. of learning threads to use; each one also uses its own env")
+    parser.add_argument("--batch_size", type=int, help="batch size for both DDPG and EMB")
+    parser.add_argument("--num_epochs", type=int, help="number of training epochs")
+    parser.add_argument("--num_episodes_per_epoch", type=int, help="number of episodes to run per epoch of training")
+    parser.add_argument("--max_episode_length", type=int, help="max length of episode before terminatiion")
+    parser.add_argument("--vrep_port_begin", type=int, help="remote port number to start V-REP simulator on")
+    parser.add_argument("--vrep_scene_file", help="scene file(.ttt) for V-REP")
+    parser.add_argument("--server_update_rate", type=float, help="update rate for server params")
+    parser.add_argument("--save_every_x_epochs", type=int, help="number of epochs before saving params to file")
+    parser.add_argument("--eval_every_x_epochs", type=int, help="number of epochs before eval model")
+    parser.add_argument("--load_params", type=bool, help="loads params from file if True")
+    parser.add_argument("--vrep_exec_path", help="full path for vrep.sh")
+    parser.add_argument("--log_file", help="file to log to")
 
     args = parser.parse_args()
 
     # create TF session
-    sess = tf.get_default_session()
+    sess = tf.Session()
 
     # initialize logger
     logger = logging.getLogger("learner")
@@ -228,6 +231,11 @@ if __name__ == "__main__":
     formatter = logging.Formatter("%(levelname)s:%(thread)d:%(filename)s:%(funcName)s:%(asctime)s::%(message)s")
     fh.setFormatter(formatter)
     logger.addHandler(fh)
+
+    # other constants
+    STATE_SIZE = 29
+    GOAL_SIZE = 1
+    ACTION_SIZE = 23
 
     # configs
     env_args = {
@@ -241,8 +249,8 @@ if __name__ == "__main__":
     }
     emb_args = {
         'sess': sess,
-        'state_size': args.state_size,
-        'goal_size': args.goal_size,
+        'state_size': STATE_SIZE,
+        'goal_size': GOAL_SIZE,
         'emb_size': args.emb_size,
         'batch_size': args.batch_size,
         'learning_rate': args.emb_learning_rate,
@@ -251,9 +259,9 @@ if __name__ == "__main__":
     actor_args = {
         'sess': sess,
         'state_size': args.emb_size,
-        'action_size': args.action_size,
+        'action_size': ACTION_SIZE,
         'batch_size': args.batch_size,
-        'target_update_rate': args.target_update_rate,
+        'target_update_rate': args.target_network_update_rate,
         'learning_rate': args.actor_learning_rate,
         'actor_network_config': {
             'hlayer_1_size': 100,
@@ -265,17 +273,17 @@ if __name__ == "__main__":
     critic_args = {
         'sess': sess,
         'state_size': args.emb_size,
-        'action_size': args.action_size,
+        'action_size': ACTION_SIZE,
         'batch_size': args.batch_size,
-        'target_update_rate': args.target_update_rate,
+        'target_update_rate': args.target_network_update_rate,
         'learning_rate': args.critic_learning_rate,
         'critic_network_config': {
-            'slayer_1_size': 100,
-            'slayer_1_type': 'relu',
-            'alayer_size': 100,
+            'slayer1_size': 100,
+            'slayer1_type': 'relu',
+            'alayer_size': 200,
             'alayer_type': 'linear',
-            'slayer_2_size': 200,
-            'slayer_2_type': 'linear',
+            'slayer2_size': 200,
+            'slayer2_type': 'linear',
             'prefinal_layer_size': 200,
             'prefinal_layer_type': 'linear'
         }
@@ -291,12 +299,12 @@ if __name__ == "__main__":
         'gamma': 0.99,
         'model_weights_suffix': args.model_weights_suffix,
         'num_epochs': args.num_epochs,
-        'state_size': args.state_size,
-        'goal_size': args.goal_size,
-        'action_size': args.action_size,
+        'state_size': STATE_SIZE,
+        'goal_size': GOAL_SIZE,
+        'action_size': ACTION_SIZE,
         'num_episodes_per_epoch': args.num_episodes_per_epoch,
         'max_episode_length': args.max_episode_length,
-        'save_every_x_epochs': args.thread_save_every_x_epochs,
+        'save_every_x_epochs': args.save_every_x_epochs,
         'load_params': args.load_params,
         'eval_every_x_epochs': args.eval_every_x_epochs
     }

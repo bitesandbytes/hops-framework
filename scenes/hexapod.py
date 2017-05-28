@@ -113,26 +113,27 @@ class Ant(object):
 
     # Get joint positions
     def get_joint_pos(self):
-        jpos = np.zeros(1, self.joint_count)
+        jpos = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
-            _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
-                                                            vrep.simx_opmode_blocking)
+            _, jpos[0, handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
+                                                               vrep.simx_opmode_blocking)
         return jpos
 
     # returns euler orientation (alpha, beta, gamma) for the body
     def get_orientation(self):
         _, euler_angles = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_blocking)
-        return np.asarray(euler_angles[0], euler_angles[1], euler_angles[2]).reshape((1, -1))
+        return np.asarray((euler_angles[0], euler_angles[1], euler_angles[2])).reshape((1, -1))
 
     # returns Cartesian coordinates (x,y,z) for the body
     def get_position(self):
         _, position = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_blocking)
-        return np.asarray(position[0], position[1], position[2]).reshape((1, -1))
+        return np.asarray((position[0], position[1], position[2])).reshape((1, -1))
 
     # set (x,y) position and rotation about z-axis
     def set_position_and_rotation(self, position, rotation):
         empty_buff = bytearray()
-        args = [position[0], position[1], self.start_pos[2], self.start_orientation[0], self.start_orientation[1],
+        args = [position[0], position[1], self.start_pos[0, 2], self.start_orientation[0, 0],
+                self.start_orientation[0, 1],
                 rotation]
         res, ret_ints, ret_floats, ret_strings, ret_buffer = vrep.simxCallScriptFunction(self.client_id, 'Ant',
                                                                                          vrep.sim_scripttype_childscript,

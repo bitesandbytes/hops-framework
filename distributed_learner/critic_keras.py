@@ -16,11 +16,12 @@ HIDDEN2_UNITS = 200
 
 class CriticNetwork(object):
     def __init__(self, args):
-        self.sess = args['sess']
+        # self.sess = args['sess']
+        self.sess = tf.Session()
         self.network_config = args['critic_network_config']  # xlayer_x_size, xlayer_x_type keys
-        self.batch_size = self.network_config['batch_size']
-        self.target_update_rate = self.network_config['target_update_rate']
-        self.learning_rate = self.network_config['learning_rate']
+        self.batch_size = args['batch_size']
+        self.target_update_rate = args['target_update_rate']
+        self.learning_rate = args['learning_rate']
 
         K.set_session(self.sess)
 

@@ -1,5 +1,4 @@
 import logging
-import subprocess
 
 import numpy as np
 
@@ -7,7 +6,7 @@ from hexapod import Ant
 
 
 def _normalize(theta):
-    if theta > 0:
+    if theta[0, 1] > 0:
         return theta
     else:
         return theta + 2 * np.pi
@@ -17,9 +16,9 @@ class AntTurnEnv(object):
     def __init__(self, args):
         # start a VREP headless background process
         self.delta_theta = None
-        subprocess.Popen(
-            [args['vrep_exec_path'], '-h', '-gREMOTEAPISERVERSERVICE_' + str(args['server_port']) + '_FALSE_TRUE',
-             args['vrep_scene_file']])
+        # subprocess.Popen(
+        #    [args['vrep_exec_path'], '-h', '-gREMOTEAPISERVERSERVICE_' + str(args['server_port']) + '_FALSE_TRUE',
+        #     args['vrep_scene_file']])
         self.ant = Ant(args['server_ip'], args['server_port'])
         self.ant.init_client()
         self.per_step_reward = args['per_step_reward']
@@ -37,15 +36,15 @@ class AntTurnEnv(object):
 
     def start(self):
         logging.getLogger("learner").info("starting env with goal:%f" % self.delta_theta)
-        self.state = np.asarray(
-            [self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()]).reshape(1, -1)
-        self.begin_angle = self.state[-1]
-        self.begin_pos = self.state[-6:-4]
-        self.goal = _normalize(self.begin_angle + self.delta_theta)
-        return self.state, self.delta_theta
+        self.state = np.append(self.ant.get_joint_pos(), [self.ant.get_position(), self.ant.get_orientation()]).reshape(
+            (1, -1))
+        self.begin_angle = self.state[0, -1]
+        self.begin_pos = self.state[0, -6:-4]
+        self.goal = np.asarray(_normalize(self.begin_angle + self.delta_theta)).reshape((1, -1))
+        return self.state, np.asarray(self.delta_theta).reshape((1, -1))
 
     def _is_terminal(self, current):
-        if np.absolute(_normalize(current) - self.goal) < self.tolerance:
+        if all(np.absolute(_normalize(current) - self.goal) < self.tolerance):
             return True
         else:
             return False
@@ -53,10 +52,10 @@ class AntTurnEnv(object):
     def step(self, action):
         logging.getLogger("learner").info("stepping")
         self.ant.set_forces_and_trigger(action)
-        new_state = np.append(self.ant.get_joint_pos(), [self.ant.get_position(), self.ant.get_orientation()])
-        net_displacement = new_state[-6:-2] - self.begin_pos
-        new_goal = self.goal - _normalize(new_state[-1])
-        if self._is_terminal(new_state[-1]):
+        new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
+        net_displacement = new_state[0, -6:-2] - self.begin_pos
+        new_goal = np.asarray(self.goal - _normalize(new_state[0, -1]))
+        if self._is_terminal(new_state[0, -1]):
             disp_reward = -np.linalg.norm(net_displacement)
             return new_state, new_goal, (disp_reward + self.final_reward), True
         else:

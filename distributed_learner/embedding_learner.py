@@ -3,6 +3,7 @@ import logging
 import keras.backend as K
 # from heraspy import *
 import numpy as np
+import tensorflow as tf
 from keras.layers import Dense, Input, merge
 from keras.models import Model
 from keras.optimizers import Adam
@@ -15,7 +16,8 @@ class EmbeddingLearner(object):
     # inp_size = Nx(S+G)
     # emd_size = NxZ
     def __init__(self, args):
-        self.sess = args['sess']
+        # self.sess = args['sess']
+        self.sess = tf.Session()
         self.state_size = args['state_size']
         self.goal_size = args['goal_size']
         self.embedding_size = args['emb_size']
@@ -28,7 +30,7 @@ class EmbeddingLearner(object):
         S = Input(shape=(self.state_size,), name='state')
         G = Input(shape=(self.goal_size,), name='goal')
         S0 = Dense(self.state_size * 2, activation='relu')(S)
-        G0 = Dense(self.goal_size * 2, actiation='relu')(G)
+        G0 = Dense(self.goal_size * 2, activation='relu')(G)
         # C = merge.Concatenate([S0, G0])#, axis=1)
         C = merge([S0, G0], mode='concat')
         emb_layer = Dense(self.embedding_size, activation='relu')(C)
