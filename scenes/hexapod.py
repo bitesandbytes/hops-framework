@@ -4,40 +4,48 @@ Interface to control Ant hexapod robot, in one of two modes:
  * Inverse Kinematics Mode (Hybrid), using Position Control (PID)
 """
 
-import numpy as np
-import vrep
 import logging
 
-class Ant:
+import numpy as np
+
+import vrep
+
+
+class Ant(object):
     def __init__(self, server_ip, server_port):
         self.server_ip = server_ip
         self.server_port = server_port
         self.client_id = None
         self.handles = None
+        self.body_handle = None
+        self.joint_count = None
+        self.start_orientation = None
+        self.start_pos = None
+        self.logger = None
 
     def init_client(self):
-        logger = logging.getLogger("learner")
+        self.logger = logging.getLogger("learner")
         # Stop any previous simulation
         vrep.simxStopSimulation(-1, vrep.simx_opmode_oneshot_wait)
         # Start a client
         self.client_id = vrep.simxStart(self.server_ip, self.server_port, True, True, 5000, 5)
         if self.client_id != -1:
-            logger.critical('Failed connecting to remote API server')
+            self.logger.critical('Failed connecting to remote API server')
 
         # Enable synchronous mode
         e = vrep.simxSynchronous(self.client_id, True)
         if e != -1:
-            logger.critical('Failed enabling remote API synchronous mode')
+            self.logger.critical('Failed enabling remote API synchronous mode')
 
         # Start simulation
         e = vrep.simxStartSimulation(self.client_id, vrep.simx_opmode_blocking)
         if e != -1:
-            logger.critical('Failed to start simulation')
+            self.logger.critical('Failed to start simulation')
 
         # Print ping time
         sec, msec = vrep.simxGetPingTime(self.client_id)
-        logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
-        logger.info("Ping time: %f" % (sec + msec / 1000.0))
+        self.logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
+        self.logger.info("Ping time: %f" % (sec + msec / 1000.0))
 
         # Obtain handle for body (for orientation, positions etc)
         _, self.body_handle = vrep.simxGetObjectHandle(self.client_id, 'Ant_body', vrep.simx_opmode_blocking)
@@ -92,21 +100,23 @@ class Ant:
 
     # force_vec = [Ant_joint{1-3}Leg{1-6}, Ant_neckJoint{1-3}, Ant_leftJawJoint, Ant_rightJawJoint]
     def set_forces(self, force_vec):
-        _ = vrep.simxPauseCommunication(self.client_id, True);
+        _ = vrep.simxPauseCommunication(self.client_id, True)
         for handle_idx in range(0, self.joint_count):
-            _ = vrep.simxSetJointForce(self.client_id, self.handles[handle_idx], force_vec[handle_idx], vrep.simx_opmode_blocking)
-        _ = vrep.simxPauseCommunication(self.client_id, False);
+            _ = vrep.simxSetJointForce(self.client_id, self.handles[handle_idx], force_vec[handle_idx],
+                                       vrep.simx_opmode_blocking)
+        _ = vrep.simxPauseCommunication(self.client_id, False)
 
     # set force_vec and trigger simulation step
     def set_forces_and_trigger(self, force_vec):
         self.set_forces(force_vec)
-        _ = vrep.simxSynchronousTrigger(self.client_id);
+        _ = vrep.simxSynchronousTrigger(self.client_id)
 
     # Get joint positions
     def get_joint_pos(self):
-        jpos = np.zeros(1,self.joint_count);
+        jpos = np.zeros(1, self.joint_count)
         for handle_idx in range(0, self.joint_count):
-            _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_blocking)
+            _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
+                                                            vrep.simx_opmode_blocking)
         return jpos
 
     # returns euler orientation (alpha, beta, gamma) for the body
@@ -121,29 +131,35 @@ class Ant:
 
     # set (x,y) position and rotation about z-axis
     def set_position_and_rotation(self, position, rotation):
-        emptyBuff = bytearray()
-        args = [position[0], position[1], self.start_pos[2], self.start_orientation[0], self.start_orientation[1], rotation]
-        res,retInts,retFloats,retStrings,retBuffer=vrep.simxCallScriptFunction(client_id,'Ant',vrep.sim_scripttype_childscript,'resetScene',[], args,[],emptyBuff,vrep.simx_opmode_blocking)
-        if res !=vrep.simx_return_ok:
-            logger.critical("failed to set position and orientation")
+        empty_buff = bytearray()
+        args = [position[0], position[1], self.start_pos[2], self.start_orientation[0], self.start_orientation[1],
+                rotation]
+        res, ret_ints, ret_floats, ret_strings, ret_buffer = vrep.simxCallScriptFunction(self.client_id, 'Ant',
+                                                                                         vrep.sim_scripttype_childscript,
+                                                                                         'resetScene', [], args, [],
+                                                                                         empty_buff,
+                                                                                         vrep.simx_opmode_blocking)
+        if res != vrep.simx_return_ok:
+            self.logger.critical("failed to set position and orientation")
 
     # Set custom dt for simulation
     def set_custom_dt(self, custom_dt):
-        _ = vrep.simxSetFloatingParameter(self.client_id, vrep.sim_floatparam_simulation_time_step, custom_dt, vrep.simx_opmode_blocking)
+        _ = vrep.simxSetFloatingParameter(self.client_id, vrep.sim_floatparam_simulation_time_step, custom_dt,
+                                          vrep.simx_opmode_blocking)
 
     def start_simulation(self):
         # Start simulation
         e = vrep.simxStartSimulation(self.client_id, vrep.simx_opmode_blocking)
         if e != -1:
-            logger.critical('Failed to start simulation')
+            self.logger.critical('Failed to start simulation')
 
         # Print ping time
         sec, msec = vrep.simxGetPingTime(self.client_id)
-        logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
-        logger.info("Ping time: %f" % (sec + msec / 1000.0))
+        self.logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
+        self.logger.info("Ping time: %f" % (sec + msec / 1000.0))
 
     def stop_simulation(self):
         vrep.simxStopSimulation(self.client_id, vrep.simx_opmode_blocking)
         # Just to make sure this gets executed
         vrep.simxGetPingTime(self.client_id)
-        logger.info("simulation stopped")
+        self.logger.info("simulation stopped")

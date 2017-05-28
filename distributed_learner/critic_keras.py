@@ -2,14 +2,13 @@
 Adapted from github.com/yanpanlau
 """
 
-import numpy as np
-import math
 import logging
-from keras.layers import Dense, Flatten, Input, merge, Activation
-from keras.models import Model
-from keras.optimizers import Adam
+
 import keras.backend as K
 import tensorflow as tf
+from keras.layers import Dense, Input, merge
+from keras.models import Model
+from keras.optimizers import Adam
 
 HIDDEN1_UNITS = 100
 HIDDEN2_UNITS = 200
@@ -52,18 +51,18 @@ class CriticNetwork(object):
 
     def create_critic_network(self, state_size, action_dim):
         logging.getLogger("learner").info("building critic")
-        S = Input(shape=[state_size])
-        A = Input(shape=[action_dim], name='action2')
+        S = Input(shape=[state_size, ])
+        A = Input(shape=[action_dim, ], name='action2')
         # HIDDEN1_UNITS, relu
         w1 = Dense(self.network_config['slayer1_size'], activation=self.network_config['slayer1_type'])(S)
         # HIDDEN2_UNITS, linear
         a1 = Dense(self.network_config['alayer_size'], activation=self.network_config['alayer_type'])(A)
         # HIDDEN2_UNITS, linear
         h1 = Dense(self.network_config['slayer2_size'], activation=self.network_config['slayer2_type'])(w1)
-        h2 = merge([h1, a1], mode='multiply')
+        h2 = merge([h1, a1], mode='mul')
         # HIDDEN2_UNITS, linear
-        h3 = Dense(self.network_config['prefinal_layer_size'], activation=self.network_config['prefinal_layer_type'])(
-            h2)
+        h3 = Dense(self.network_config['prefinal_layer_size'],
+                   activation=self.network_config['prefinal_layer_type'])(h2)
         V = Dense(action_dim, activation='linear')(h3)
         model = Model(input=[S, A], output=V)
         adam = Adam(lr=self.learning_rate)
