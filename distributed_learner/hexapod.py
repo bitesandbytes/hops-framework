@@ -8,6 +8,8 @@ import logging
 
 import numpy as np
 
+import time
+
 import vrep
 
 
@@ -144,6 +146,7 @@ class Ant(object):
 
     # set (x,y) position and rotation about z-axis
     def set_position_and_rotation(self, position, rotation):
+        #time.sleep(0.2)
         empty_buff = bytearray()
         args = [position[0], position[1], self.start_pos[0, 2], self.start_orientation[0, 0],
                 self.start_orientation[0, 1],
@@ -173,13 +176,16 @@ class Ant(object):
         self.logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
         self.logger.info("Ping time: %f" % (sec + msec / 1000.0))
 
+        # required
+        self.start_pos = self._get_position()
+        self.start_orientation = self._get_orientation()
+
     def stop_simulation(self):
         # issue command to stop simulation
         vrep.simxStopSimulation(self.client_id, vrep.simx_opmode_blocking)
         # stop all streaming
         for handle_idx in range(0, self.joint_count):
-            _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
-                                                               vrep.simx_opmode_discontinue)
+            _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
 

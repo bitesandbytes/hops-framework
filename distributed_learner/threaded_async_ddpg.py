@@ -10,20 +10,25 @@ import tensorflow as tf
 from actor_keras import ActorNetwork
 from critic_keras import CriticNetwork
 from embedding_learner import EmbeddingLearner
-from scenes.turn_env import AntTurnEnv
+from turn_env import AntTurnEnv
 
 
-def _learner_thread(args, thread_id, sync_nets, locks):
+def _learner_thread(args, thread_id, sync_weights, locks):
     logger = logging.getLogger("learner")
+    thread_session = tf.Session()
 
     emb_lock, ddpg_lock = locks[0], locks[1]
-    emb_server_net, actor_server_net, critic_server_net = sync_nets[0], sync_nets[1], sync_nets[2]
+    emb_server, actor_server, critic_server = sync_weights[0], sync_weights[1], sync_weights[2]
     update_rate = args['server_update_rate']
     emb_out_of_sync, ddpg_out_of_sync = 0, 0
     emb_max_out_of_sync, ddpg_max_out_of_sync = args['emb_max_out_of_sync'], args['ddpg_max_out_of_sync']
 
     env_args = args['env_args']
     # init Actor, Critic and EMB networks
+
+    args['actor_args']['sess'] = thread_session
+    args['critic_args']['sess'] = thread_session
+    args['emb_args']['sess'] = thread_session
     actor = ActorNetwork(args['actor_args'])
     critic = CriticNetwork(args['critic_args'])
     embedder = EmbeddingLearner(args['emb_args'])
@@ -63,7 +68,6 @@ def _learner_thread(args, thread_id, sync_nets, locks):
         is_final = np.zeros((0, 1))
 
         for episode in range(0, args['num_episodes_per_epoch']):
-            env.reset()
             rand_goal = np.random.uniform(-np.pi, +np.pi)
             logger.info("starting - epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
             env.set_goal(rand_goal)
@@ -76,22 +80,23 @@ def _learner_thread(args, thread_id, sync_nets, locks):
                 # NOTE : adding a small random noise to system
                 action += np.random.normal(loc=0.0, scale=0.5, size=action.shape)
                 next_state, next_goal, reward, has_ended = env.step(action)
-                np.append(cur_states, cur_state, axis=0)
-                np.append(next_states, next_state, axis=0)
-                np.append(cur_goals, cur_goal, axis=0)
-                np.append(next_goals, next_goal, axis=0)
-                np.append(rewards, reward, axis=0)
+                cur_states = np.vstack((cur_states, cur_state))
+                next_states = np.vstack((next_states, next_state))
+                cur_goals = np.vstack((cur_goals, cur_goal))
+                next_goals = np.vstack((next_goals, next_goal))
+                rewards = np.vstack((rewards, reward))
                 if has_ended:
-                    np.append(is_final, np.asarray([0.0]), axis=0)
+                    is_final = np.vstack((is_final, 0.0))
                 else:
-                    np.append(is_final, np.asarray([1.0]), axis=0)
-                np.append(actions, action, axis=0)
+                    is_final = np.vstack((is_final, 1.0))
+                actions = np.vstack((actions, action))
                 num_steps += 1
                 if has_ended:
                     logger.info("achieved goal")
                     break
                 cur_state = next_state
                 cur_goal = next_goal
+            env.reset()
             logger.info(
                 "ended - epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
         # EMB train & update
@@ -100,13 +105,22 @@ def _learner_thread(args, thread_id, sync_nets, locks):
         logger.info("EMB fit")
         # EMB update
         emb_lock.acquire()
-        for cur_layer, server_layer in zip(embedder.autoencoder.layers, emb_server_net.autoencoder.layers):
-            server_layer.set_weights(
-                (1 - update_rate) * server_layer.get_weights() + update_rate * cur_layer.get_weights())
+        '''
+        cur_weights = embedder.autoencoder.get_weights()
+        target_weights = emb_server_net.autoencoder.get_weights()
+        for i in xrange(len(cur_weights)):
+            target_weights[i] = (1 - update_rate) * target_weights[i] + update_rate * cur_weights[i]
+
+        emb_server_net.autoencoder.set_weights(target_weights)
+        '''
+        cur_emb = embedder.autoencoder.get_weights()
+        for i in xrange(len(server_emb)):
+            server_emb[i] = (1 - update_rate) * server_emb[i] + update_rate * cur_emb[i]
+
         emb_out_of_sync += 1
+
         if emb_out_of_sync == emb_max_out_of_sync:
-            for cur_layer, server_layer in zip(embedder.autoencoder.layers, emb_server_net.layers):
-                cur_layer.set_weights(server_layer.get_weights())
+            embedder.autoencoder.set_weights(server_emb)
             emb_out_of_sync = 0
             logger.info("EMB synced")
         emb_lock.release()
@@ -117,7 +131,8 @@ def _learner_thread(args, thread_id, sync_nets, locks):
         # NOTE : multiplying by has_ended makes sure that final transition only takes reward as target
         targets = rewards + gamma * np.multiply(is_final, critic.target_model.predict(
             [next_embs, actor.target_model.predict(next_embs)]))
-        critic.model.train_on_batch(cur_embs, targets)
+        loss = critic.model.train_on_batch([cur_embs, actions], targets)
+        logger.info("critic loss:%f" % loss)
         actions_for_gradients = actor.model.predict(cur_embs)
         grad_q_wrt_a = critic.gradients(cur_embs, actions_for_gradients)
         actor.train(cur_embs, grad_q_wrt_a)
@@ -126,18 +141,20 @@ def _learner_thread(args, thread_id, sync_nets, locks):
         logger.info("DDPG fit")
         # DDPG update
         ddpg_lock.acquire()
-        for cur_layer, server_layer in zip(actor.model.layers, actor_server_net.model.layers):
-            server_layer.set_weights(
-                (1 - update_rate) * server_layer.get_weights() + update_rate * cur_layer.get_weights())
-        for cur_layer, server_layer in zip(critic.model.layers, critic_server_net.model.layers):
-            server_layer.set_weights(
-                (1 - update_rate) * server_layer.get_weights() + update_rate * cur_layer.get_weights())
+        # update server
+        actor_local = actor.model.get_weights()
+        for i in xrange(len(actor_server)):
+            actor_server[i] = (1 - update_rate) * actor_server[i] + update_rate * actor_local[i]
+        critic_local = critic.model.get_weights()
+        for i in xrange(len(critic_server)):
+            critic_server[i] = (1 - update_rate) * critic_server[i] + update_rate * critic_local[i]
+
         ddpg_out_of_sync += 1
         if ddpg_out_of_sync == ddpg_max_out_of_sync:
-            for cur_layer, server_layer in zip(actor.model.layers, actor_server_net.model.layers):
-                cur_layer.set_weights(server_layer.get_weights())
-            for cur_layer, server_layer in zip(critic.model.layers, critic_server_net.model.layers):
-                cur_layer.set_weights(server_layer.get_weights())
+            actor.target_model.set_weights(actor_server)
+            actor.model.set_weights(actor_server)
+            critic.target_model.set_weights(critic_server)
+            critic.model.set_weights(critic_server)
             ddpg_out_of_sync = 0
             logger.info("DDPG synced")
         ddpg_lock.release()
@@ -223,6 +240,9 @@ if __name__ == "__main__":
 
     # create TF session
     sess = tf.Session()
+    actor_session = tf.Session()
+    critic_session = tf.Session()
+    emb_session = tf.Session()
 
     # initialize logger
     logger = logging.getLogger("learner")
@@ -248,7 +268,7 @@ if __name__ == "__main__":
         'spawn_radius': 6,
     }
     emb_args = {
-        'sess': sess,
+        'sess': emb_session,
         'state_size': STATE_SIZE,
         'goal_size': GOAL_SIZE,
         'emb_size': args.emb_size,
@@ -257,7 +277,7 @@ if __name__ == "__main__":
         # 'thread_idx' : 0,
     }
     actor_args = {
-        'sess': sess,
+        'sess': actor_session,
         'state_size': args.emb_size,
         'action_size': ACTION_SIZE,
         'batch_size': args.batch_size,
@@ -271,7 +291,7 @@ if __name__ == "__main__":
         }
     }
     critic_args = {
-        'sess': sess,
+        'sess': critic_session,
         'state_size': args.emb_size,
         'action_size': ACTION_SIZE,
         'batch_size': args.batch_size,
@@ -311,13 +331,14 @@ if __name__ == "__main__":
     logger.info("args init complete")
 
     emb_lock, ddpg_lock = threading.Lock(), threading.Lock()
-    server_emb, server_actor, server_critic = EmbeddingLearner(emb_args), ActorNetwork(actor_args), CriticNetwork(
-        critic_args)
+    server_emb, server_actor, server_critic = EmbeddingLearner(emb_args).autoencoder.get_weights(), ActorNetwork(
+        actor_args).model.get_weights(), CriticNetwork(
+        critic_args).model.get_weights()
     if args.load_params:
         try:
-            server_emb.autoencoder.load_weights('embedder_server' + args['model_weights_suffix'] + '.h5')
-            server_actor.model.load_weights('actor_server' + args['model_weights_suffix'] + '.h5')
-            server_critic.model.load_weights('critic_server' + args['model_weights_suffix'] + '.h5')
+            server_emb.autoencoder.load_weights('embedder_server' + args.model_weights_suffix + '.h5')
+            server_actor.model.load_weights('actor_server' + args.model_weights_suffix + '.h5')
+            server_critic.model.load_weights('critic_server' + args.model_weights_suffix + '.h5')
         except:
             logger.error("failed to load server params; re-initializing server params")
 
@@ -342,15 +363,15 @@ if __name__ == "__main__":
             if thread.isAlive():
                 done = False
                 break
-        threads = [t for t in threads if not t.handled]
+        # threads = [t for t in threads if not t.handled]
 
         # save params
         emb_lock.acquire()
-        server_emb.autoencoder.save_weights('embedder_server' + args['model_weights_suffix'] + '.h5')
+        server_emb.autoencoder.save_weights('embedder_server' + args.model_weights_suffix + '.h5')
         emb_lock.release()
         ddpg_lock.acquire()
-        server_actor.model.save_weights('actor_server' + args['model_weights_suffix'] + '.h5')
-        server_critic.model.save_weights('critic_server' + args['model_weights_suffix'] + '.h5')
+        server_actor.model.save_weights('actor_server' + args.model_weights_suffix + '.h5')
+        server_critic.model.save_weights('critic_server' + args.model_weights_suffix + '.h5')
         ddpg_lock.release()
 
         logger.info("saving server params")

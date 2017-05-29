@@ -13,8 +13,8 @@ from keras.models import Model
 
 class ActorNetwork(object):
     def __init__(self, args):
-        # self.sess = args['sess']
-        self.sess = tf.Session()
+        self.sess = args['sess']
+        #self.sess = tf.Session()
         self.batch_size = args['batch_size']
         self.target_update_rate = args['target_update_rate']
         self.learning_rate = args['learning_rate']
@@ -31,7 +31,8 @@ class ActorNetwork(object):
         self.params_grad = tf.gradients(self.model.output, self.weights, -self.action_gradient)
         grads = zip(self.params_grad, self.weights)
         self.optimize = tf.train.AdamOptimizer(self.learning_rate).apply_gradients(grads)
-        self.sess.run(tf.initialize_all_variables())
+        #self.sess.run(tf.initialize_all_variables())
+        self.sess.run(tf.global_variables_initializer())
 
     def train(self, states, action_grads):
         logging.getLogger("learner").info("training actor")
@@ -42,17 +43,11 @@ class ActorNetwork(object):
 
     def target_train(self):
         logging.getLogger("learner").info("actor target update")
-        for cur_layer, target_layer in zip(self.model.layers, self.target_model.layers):
-            target_layer.set_weights((1 - self.target_update_rate) * target_layer.get_weights()
-                                     + self.target_update_rate * cur_layer.get_weights())
-        '''
-        actor_weights = self.model.get_weights()
-        actor_target_weights = self.target_model.get_weights()
-        for i in xrange(len(actor_weights)):
-            actor_target_weights[i] = self.target_update_rate * actor_weights[i] + (1 - self.target_update_rate) * \
-                                                                                   actor_target_weights[i]
-        self.target_model.set_weights(actor_target_weights)
-        '''
+        cur_weights, target_weights = self.model.get_weights(), self.target_model.get_weights()
+        for i in xrange(len(target_weights)):
+            target_weights[i] = (1 - self.target_update_rate) * target_weights[i] + self.target_update_rate * \
+                                                                                    cur_weights[i]
+        self.target_model.set_weights(target_weights)
 
     def create_actor_network(self, state_size, action_dim):
         logging.getLogger("learner").info("building actor")

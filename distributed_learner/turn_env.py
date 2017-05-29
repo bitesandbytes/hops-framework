@@ -2,11 +2,13 @@ import logging
 
 import numpy as np
 
+import time
+
 from hexapod import Ant
 
 
 def _normalize(theta):
-    if theta[0, 1] > 0:
+    if theta > 0:
         return theta
     else:
         return theta + 2 * np.pi
@@ -36,15 +38,14 @@ class AntTurnEnv(object):
 
     def start(self):
         logging.getLogger("learner").info("starting env with goal:%f" % self.delta_theta)
-        self.state = np.append(self.ant.get_joint_pos(), [self.ant.get_position(), self.ant.get_orientation()]).reshape(
-            (1, -1))
-        self.begin_angle = self.state[0, -1]
+        self.state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
+        self.begin_angle = self.state[0, -1].item()
         self.begin_pos = self.state[0, -6:-4]
-        self.goal = np.asarray(_normalize(self.begin_angle + self.delta_theta)).reshape((1, -1))
+        self.goal = _normalize(self.begin_angle + self.delta_theta)
         return self.state, np.asarray(self.delta_theta).reshape((1, -1))
 
     def _is_terminal(self, current):
-        if all(np.absolute(_normalize(current) - self.goal) < self.tolerance):
+        if np.absolute(_normalize(current) - self.goal) < self.tolerance:
             return True
         else:
             return False
@@ -53,17 +54,19 @@ class AntTurnEnv(object):
         logging.getLogger("learner").info("stepping")
         self.ant.set_forces_and_trigger(action)
         new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
-        net_displacement = new_state[0, -6:-2] - self.begin_pos
-        new_goal = np.asarray(self.goal - _normalize(new_state[0, -1]))
-        if self._is_terminal(new_state[0, -1]):
+        net_displacement = new_state[0, -6:-4] - self.begin_pos
+        new_goal = np.asarray(self.goal - _normalize(new_state[0, -1].item())).reshape((1, -1))
+        if self._is_terminal(new_state[0, -1].item()):
             disp_reward = -np.linalg.norm(net_displacement)
             return new_state, new_goal, (disp_reward + self.final_reward), True
         else:
-            return new_state, new_goal, self.per_step_reward, self.per_step_reward, False
+            return new_state, new_goal, self.per_step_reward, False
 
     def reset(self):
         logging.getLogger("learner").info("resetting")
         self.ant.stop_simulation()
+        time.sleep(0.5)
+        self.ant.start_simulation()
         spawn_rad = np.random.uniform(-self.spawn_radius, +self.spawn_radius)
         angle = np.random.uniform(0, 2 * np.pi)
         self.ant.set_position_and_rotation(spawn_rad * np.asarray((np.cos(angle), np.sin(angle))),

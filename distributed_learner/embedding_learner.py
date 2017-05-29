@@ -16,7 +16,7 @@ class EmbeddingLearner(object):
     # inp_size = Nx(S+G)
     # emd_size = NxZ
     def __init__(self, args):
-        # self.sess = args['sess']
+        #self.sess = args['sess']
         self.sess = tf.Session()
         self.state_size = args['state_size']
         self.goal_size = args['goal_size']
@@ -48,6 +48,8 @@ class EmbeddingLearner(object):
 
         K.set_session(self.sess)
 
+        self.sess.run(tf.global_variables_initializer())
+
     # states=NxS, goals=NxG
     def fit(self, states, goals, val_ratio=0.05):
         logging.getLogger("learner").info("EMB fitting")
@@ -56,8 +58,8 @@ class EmbeddingLearner(object):
 
         # Split data into val and train dataset
         indices = np.random.permutation(states.shape[0])
-        val_idx, train_idx = indices[:np.floor(states.shape[0] * val_ratio)], indices[
-                                                                              np.floor(states.shape[0] * val_ratio):]
+        val_idx, train_idx = indices[:int(np.floor(states.shape[0] * val_ratio))], \
+                             indices[int(np.floor(states.shape[0] * val_ratio)):]
         val_states, train_states = states[val_idx, :], states[train_idx, :]
         val_goals, train_goals = goals[val_idx, :], goals[train_idx, :]
         self.autoencoder.fit([train_states, train_goals], [train_states, train_goals],
