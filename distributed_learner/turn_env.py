@@ -1,7 +1,7 @@
 import logging
-import numpy as np
-import subprocess
 import time
+
+import numpy as np
 
 from hexapod import Ant
 
@@ -17,9 +17,9 @@ class AntTurnEnv(object):
     def __init__(self, args):
         # start a VREP headless background process
         self.delta_theta = None
-        subprocess.Popen(
-            [args['vrep_exec_path'], '-h', '-gREMOTEAPISERVERSERVICE_' + str(args['server_port']) + '_FALSE_TRUE',
-             args['vrep_scene_file']])
+        # subprocess.Popen(
+        #    [args['vrep_exec_path'], '-h', '-gREMOTEAPISERVERSERVICE_' + str(args['server_port']) + '_FALSE_TRUE',
+        #     args['vrep_scene_file']])
         self.ant = Ant(args['server_ip'], args['server_port'])
         self.ant.init_client()
         self.per_step_reward = args['per_step_reward']

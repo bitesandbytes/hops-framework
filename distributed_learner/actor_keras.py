@@ -13,14 +13,13 @@ from keras.models import Model
 
 class ActorNetwork(object):
     def __init__(self, args):
-        self.sess = args['sess']
-        #self.sess = tf.Session()
+        self.sess = K.get_session()
         self.batch_size = args['batch_size']
         self.target_update_rate = args['target_update_rate']
         self.learning_rate = args['learning_rate']
         self.network_config = args['actor_network_config']  # hlayer_x_size, hlayer_x_type keys
 
-        K.set_session(self.sess)
+        # K.set_session(self.sess)
 
         # Now create the model
         state_size, action_size = args['state_size'], args['action_size']

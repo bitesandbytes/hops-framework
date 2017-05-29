@@ -17,13 +17,14 @@ HIDDEN2_UNITS = 200
 class CriticNetwork(object):
     def __init__(self, args):
         #self.sess = tf.Session()
-        self.sess = args['sess']
+        # self.sess = args['sess']
+        self.sess = K.get_session()
         self.network_config = args['critic_network_config']  # xlayer_x_size, xlayer_x_type keys
         self.batch_size = args['batch_size']
         self.target_update_rate = args['target_update_rate']
         self.learning_rate = args['learning_rate']
 
-        K.set_session(self.sess)
+        #K.set_session(self.sess)
 
         # Now create the model
         state_size, action_size = args['state_size'], args['action_size']

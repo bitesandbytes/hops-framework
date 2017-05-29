@@ -4,6 +4,7 @@ import os
 import threading
 import time
 
+import keras.backend as K
 import numpy as np
 import tensorflow as tf
 
@@ -13,9 +14,11 @@ from embedding_learner import EmbeddingLearner
 from turn_env import AntTurnEnv
 
 
-def _learner_thread(args, thread_id, sync_weights, locks):
+def _learner_thread(args, sess, thread_id, sync_weights, locks):
     logger = logging.getLogger("learner")
-    thread_session = tf.Session()
+    # K.setthread_session = tf.Session(config=tf.ConfigProto(inter_op_parallelism_threads=4,
+    #                                           intra_op_parallelism_threads=4))
+    K.set_session(sess)
 
     emb_lock, ddpg_lock = locks[0], locks[1]
     emb_server, actor_server, critic_server = sync_weights[0], sync_weights[1], sync_weights[2]
@@ -26,181 +29,189 @@ def _learner_thread(args, thread_id, sync_weights, locks):
     env_args = args['env_args']
     # init Actor, Critic and EMB networks
 
-    args['actor_args']['sess'] = thread_session
-    args['critic_args']['sess'] = thread_session
-    args['emb_args']['sess'] = thread_session
-    actor = ActorNetwork(args['actor_args'])
-    critic = CriticNetwork(args['critic_args'])
-    embedder = EmbeddingLearner(args['emb_args'])
-    env = AntTurnEnv({
-        'server_ip': '127.0.0.1',
-        'server_port': env_args['vrep_port'] + thread_id,
-        'vrep_exec_path': env_args['vrep_exec_path'],
-        'vrep_scene_file': env_args['vrep_scene_file'],
-        'per_step_reward': env_args['per_step_reward'],
-        'final_reward': env_args['final_reward'],
-        'tolerance': env_args['tolerance'],
-        'spawn_radius': env_args['spawn_radius']
-    })
+    # args['actor_args']['sess'] = K.get_session()
+    # args['critic_args']['sess'] = K.get_session()
+    # args['emb_args']['sess'] = K.get_session()
 
-    gamma = args['gamma']
+    with sess.graph.as_default():
+        actor = ActorNetwork(args['actor_args'])
+        critic = CriticNetwork(args['critic_args'])
+        embedder = EmbeddingLearner(args['emb_args'])
+        env = AntTurnEnv({
+            'server_ip': '127.0.0.1',
+            'server_port': env_args['vrep_port'] + thread_id,
+            'vrep_exec_path': env_args['vrep_exec_path'],
+            'vrep_scene_file': env_args['vrep_scene_file'],
+            'per_step_reward': env_args['per_step_reward'],
+            'final_reward': env_args['final_reward'],
+            'tolerance': env_args['tolerance'],
+            'spawn_radius': env_args['spawn_radius']
+        })
 
-    # load N/W weights
-    if args['load_params']:
-        try:
-            embedder.autoencoder.load_weights('embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            actor.model.load_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            actor.target_model.load_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            critic.model.load_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            critic.target_model.load_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            logger.info("loaded weights from file, resuming training")
-        except:
-            logger.error("unable to load learner thread params; re-initializing")
-            pass
+        gamma = args['gamma']
 
-    for epoch in range(0, args['num_epochs']):
-        cur_states = np.zeros((0, args['state_size']))
-        cur_goals = np.zeros((0, args['goal_size']))
-        next_states = np.zeros((0, args['state_size']))
-        next_goals = np.zeros((0, args['goal_size']))
-        actions = np.zeros((0, args['action_size']))
-        rewards = np.zeros((0, 1))
-        is_final = np.zeros((0, 1))
+        # load N/W weights
+        if args['load_params']:
+            try:
+                embedder.autoencoder.load_weights(
+                    'embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                actor.model.load_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                actor.target_model.load_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                critic.model.load_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                critic.target_model.load_weights(
+                    'critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                logger.info("loaded weights from file, resuming training")
+            except:
+                logger.error("unable to load learner thread params; re-initializing")
+                pass
 
-        for episode in range(0, args['num_episodes_per_epoch']):
-            rand_goal = np.random.uniform(-np.pi, +np.pi)
-            logger.info("starting - epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
-            env.set_goal(rand_goal)
-            # cur_goal = randomly generated starting goal
-            cur_state, cur_goal = env.start()
-            next_state, next_goal = cur_state, cur_goal
-            num_steps = 0
-            for step_no in range(0, args['max_episode_length']):
-                action = actor.target_model.predict(embedder.embed(cur_state, cur_goal))
-                # NOTE : adding a small random noise to system
-                action += np.random.normal(loc=0.0, scale=0.2, size=action.shape)
-                next_state, next_goal, reward, has_ended = env.step(action)
-                cur_states = np.vstack((cur_states, cur_state))
-                next_states = np.vstack((next_states, next_state))
-                cur_goals = np.vstack((cur_goals, cur_goal))
-                next_goals = np.vstack((next_goals, next_goal))
-                rewards = np.vstack((rewards, reward))
-                if has_ended:
-                    is_final = np.vstack((is_final, 0.0))
-                else:
-                    is_final = np.vstack((is_final, 1.0))
-                actions = np.vstack((actions, action))
-                num_steps += 1
-                if has_ended:
-                    logger.info("achieved goal")
-                    break
-                cur_state = next_state
-                cur_goal = next_goal
-            env.reset()
-            logger.info(
-                "ended - epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
-        # EMB train & update
-        # train EMB
-        embedder.fit(states=cur_states, goals=cur_goals)
-        logger.info("EMB fit")
-        # EMB update
-        emb_lock.acquire()
-        '''
-        cur_weights = embedder.autoencoder.get_weights()
-        target_weights = emb_server_net.autoencoder.get_weights()
-        for i in xrange(len(cur_weights)):
-            target_weights[i] = (1 - update_rate) * target_weights[i] + update_rate * cur_weights[i]
+        for epoch in range(0, args['num_epochs']):
+            cur_states = np.zeros((0, args['state_size']))
+            cur_goals = np.zeros((0, args['goal_size']))
+            next_states = np.zeros((0, args['state_size']))
+            next_goals = np.zeros((0, args['goal_size']))
+            actions = np.zeros((0, args['action_size']))
+            rewards = np.zeros((0, 1))
+            is_final = np.zeros((0, 1))
 
-        emb_server_net.autoencoder.set_weights(target_weights)
-        '''
-        cur_emb = embedder.autoencoder.get_weights()
-        for i in xrange(len(server_emb)):
-            server_emb[i] = (1 - update_rate) * server_emb[i] + update_rate * cur_emb[i]
-
-        emb_out_of_sync += 1
-
-        if emb_out_of_sync == emb_max_out_of_sync:
-            embedder.autoencoder.set_weights(server_emb)
-            emb_out_of_sync = 0
-            logger.info("EMB synced")
-        emb_lock.release()
-
-        # DDPG train & update
-        # DDPG train
-        cur_embs, next_embs = embedder.embed(cur_states, cur_goals), embedder.embed(next_states, next_goals)
-        # NOTE : multiplying by has_ended makes sure that final transition only takes reward as target
-        targets = rewards + gamma * np.multiply(is_final, critic.target_model.predict(
-            [next_embs, actor.target_model.predict(next_embs)]))
-        loss = critic.model.train_on_batch([cur_embs, actions], targets)
-        logger.info("critic loss:%f" % loss)
-        actions_for_gradients = actor.model.predict(cur_embs)
-        grad_q_wrt_a = critic.gradients(cur_embs, actions_for_gradients)
-        actor.train(cur_embs, grad_q_wrt_a)
-        actor.target_train()
-        critic.target_train()
-        logger.info("DDPG fit")
-        # DDPG update
-        ddpg_lock.acquire()
-        # update server
-        actor_local = actor.model.get_weights()
-        for i in xrange(len(actor_server)):
-            actor_server[i] = (1 - update_rate) * actor_server[i] + update_rate * actor_local[i]
-        critic_local = critic.model.get_weights()
-        for i in xrange(len(critic_server)):
-            critic_server[i] = (1 - update_rate) * critic_server[i] + update_rate * critic_local[i]
-
-        ddpg_out_of_sync += 1
-        if ddpg_out_of_sync == ddpg_max_out_of_sync:
-            actor.target_model.set_weights(actor_server)
-            actor.model.set_weights(actor_server)
-            critic.target_model.set_weights(critic_server)
-            critic.model.set_weights(critic_server)
-            ddpg_out_of_sync = 0
-            logger.info("DDPG synced")
-        ddpg_lock.release()
-
-        # save network params
-        if np.mod(epoch, args['save_every_x_epochs']) == 0:
-            embedder.autoencoder.save_weights('embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            actor.model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            actor.target_model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            critic.model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            critic.target_model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-            logger.info("params saved")
-
-        if np.mod(epoch, args['eval_every_x_epochs']) == 0:
-            logger.info("model eval at epoch %d" % epoch)
-            # average of 5 tries
-            avg_reward = 0
-            avg_num_steps = 0
-            for t in range(0, 5):
-                env.reset()
+            for episode in range(0, args['num_episodes_per_epoch']):
                 rand_goal = np.random.uniform(-np.pi, +np.pi)
+                logger.info("starting - epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
                 env.set_goal(rand_goal)
+                # cur_goal = randomly generated starting goal
                 cur_state, cur_goal = env.start()
                 next_state, next_goal = cur_state, cur_goal
-                episode_reward = 0
                 num_steps = 0
-                for step in range(0, args['max_episode_length']):
-                    action = actor.model.predict(embedder.embed(cur_state, cur_goal))
+                for step_no in range(0, args['max_episode_length']):
+                    action = actor.target_model.predict(embedder.embed(cur_state, cur_goal))
+                    # NOTE : adding a small random noise to system
+                    action += np.random.normal(loc=0.0, scale=0.2, size=action.shape)
                     next_state, next_goal, reward, has_ended = env.step(action)
-                    episode_reward += reward
+                    cur_states = np.vstack((cur_states, cur_state))
+                    next_states = np.vstack((next_states, next_state))
+                    cur_goals = np.vstack((cur_goals, cur_goal))
+                    next_goals = np.vstack((next_goals, next_goal))
+                    rewards = np.vstack((rewards, reward))
+                    if has_ended:
+                        is_final = np.vstack((is_final, 0.0))
+                    else:
+                        is_final = np.vstack((is_final, 1.0))
+                    actions = np.vstack((actions, action))
                     num_steps += 1
                     if has_ended:
+                        logger.info("achieved goal")
                         break
-                avg_reward += episode_reward
-                avg_num_steps += num_steps
-            avg_reward /= 5.0
-            avg_num_steps /= 5.0
-            logger.info("avg_reward:%f, avg_num_steps:%f" % (avg_reward, avg_num_steps))
+                    cur_state = next_state
+                    cur_goal = next_goal
+                env.reset()
+                logger.info(
+                    "ended - epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
+            # EMB train & update
+            # train EMB
+            embedder.fit(states=cur_states, goals=cur_goals)
+            logger.info("EMB fit")
+            # EMB update
+            emb_lock.acquire()
+            '''
+            cur_weights = embedder.autoencoder.get_weights()
+            target_weights = emb_server_net.autoencoder.get_weights()
+            for i in xrange(len(cur_weights)):
+                target_weights[i] = (1 - update_rate) * target_weights[i] + update_rate * cur_weights[i]
+    
+            emb_server_net.autoencoder.set_weights(target_weights)
+            '''
+            emb_local = embedder.autoencoder.get_weights()
+            for i in xrange(len(emb_server)):
+                emb_server[i] = ((1 - update_rate) * emb_server[i] + update_rate * emb_local[i]).reshape(
+                    emb_server[i].shape)
+            emb_out_of_sync += 1
 
-    # Save network params one last time
-    embedder.autoencoder.save_weights('embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-    actor.model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-    actor.target_model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-    critic.model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-    critic.target_model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-    logger.info("learning complete; thread exiting")
+            if emb_out_of_sync == emb_max_out_of_sync:
+                embedder.autoencoder.set_weights(emb_server)
+                emb_out_of_sync = 0
+                logger.info("EMB synced")
+            emb_lock.release()
+
+            # DDPG train & update
+            # DDPG train
+            cur_embs, next_embs = embedder.embed(cur_states, cur_goals), embedder.embed(next_states, next_goals)
+            # NOTE : multiplying by has_ended makes sure that final transition only takes reward as target
+            targets = rewards + gamma * np.multiply(is_final, critic.target_model.predict(
+                [next_embs, actor.target_model.predict(next_embs)]))
+            loss = critic.model.train_on_batch([cur_embs, actions], targets)
+            logger.info("critic loss:%f" % loss)
+            actions_for_gradients = actor.model.predict(cur_embs)
+            grad_q_wrt_a = critic.gradients(cur_embs, actions_for_gradients)
+            actor.train(cur_embs, grad_q_wrt_a)
+            actor.target_train()
+            critic.target_train()
+            logger.info("DDPG fit")
+            # DDPG update
+            ddpg_lock.acquire()
+            # update server
+            actor_local = actor.model.get_weights()
+            for i in xrange(len(actor_server)):
+                actor_server[i] = ((1 - update_rate) * actor_server[i] + update_rate * actor_local[i]).reshape(
+                    actor_server[i].shape)
+            critic_local = critic.model.get_weights()
+            for i in xrange(len(critic_server)):
+                critic_server[i] = ((1 - update_rate) * critic_server[i] + update_rate * critic_local[i]).reshape(
+                    critic_server[i].shape)
+
+            ddpg_out_of_sync += 1
+            if ddpg_out_of_sync == ddpg_max_out_of_sync:
+                actor.target_model.set_weights(actor_server)
+                actor.model.set_weights(actor_server)
+                critic.target_model.set_weights(critic_server)
+                critic.model.set_weights(critic_server)
+                ddpg_out_of_sync = 0
+                logger.info("DDPG synced")
+            ddpg_lock.release()
+
+            # save network params
+            if np.mod(epoch, args['save_every_x_epochs']) == 0:
+                embedder.autoencoder.save_weights(
+                    'embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                actor.model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                actor.target_model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                critic.model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                critic.target_model.save_weights(
+                    'critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+                logger.info("params saved")
+
+            if np.mod(epoch, args['eval_every_x_epochs']) == 0:
+                logger.info("model eval at epoch %d" % epoch)
+                # average of 5 tries
+                avg_reward = 0
+                avg_num_steps = 0
+                for t in range(0, 5):
+                    env.reset()
+                    rand_goal = np.random.uniform(-np.pi, +np.pi)
+                    env.set_goal(rand_goal)
+                    cur_state, cur_goal = env.start()
+                    next_state, next_goal = cur_state, cur_goal
+                    episode_reward = 0
+                    num_steps = 0
+                    for step in range(0, args['max_episode_length']):
+                        action = actor.model.predict(embedder.embed(cur_state, cur_goal))
+                        next_state, next_goal, reward, has_ended = env.step(action)
+                        episode_reward += reward
+                        num_steps += 1
+                        if has_ended:
+                            break
+                    avg_reward += episode_reward
+                    avg_num_steps += num_steps
+                avg_reward /= 5.0
+                avg_num_steps /= 5.0
+                logger.info("avg_reward:%f, avg_num_steps:%f" % (avg_reward, avg_num_steps))
+
+        # Save network params one last time
+        embedder.autoencoder.save_weights('embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+        actor.model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+        actor.target_model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+        critic.model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+        critic.target_model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
+        logger.info("learning complete; thread exiting")
 
 
 if __name__ == "__main__":
@@ -239,7 +250,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # create TF session
-    sess = tf.Session()
+    sess = tf.Session(config=tf.ConfigProto(log_device_placement=False, allow_soft_placement=True))
 
     # initialize logger
     logger = logging.getLogger("learner")
@@ -330,21 +341,24 @@ if __name__ == "__main__":
     emb_lock, ddpg_lock = threading.Lock(), threading.Lock()
     server_emb, server_actor, server_critic = EmbeddingLearner(emb_args), ActorNetwork(actor_args), CriticNetwork(
         critic_args)
-    if args.load_params:
-        try:
-            server_emb.autoencoder.load_weights('embedder_server' + args.model_weights_suffix + '.h5')
-            server_actor.model.load_weights('actor_server' + args.model_weights_suffix + '.h5')
-            server_critic.model.load_weights('critic_server' + args.model_weights_suffix + '.h5')
-        except:
-            logger.error("failed to load server params; re-initializing server params")
-
     # start learner threads
     emb_params, actor_params, critic_params = server_emb.autoencoder.get_weights(), server_actor.model.get_weights(), server_critic.model.get_weights()
+
+    if args.load_params:
+        try:
+            emb_params = np.load('embedder_server' + args.model_weights_suffix + '.npy')
+            actor_params = np.load('actor_server' + args.model_weights_suffix + '.npy')
+            critic_params = np.load('critic_server' + args.model_weights_suffix + '.npy')
+            # server_emb.autoencoder.load_weights('embedder_server' + args.model_weights_suffix + '.h5')
+            # server_actor.model.load_weights('actor_server' + args.model_weights_suffix + '.h5')
+            # server_critic.model.load_weights('critic_server' + args.model_weights_suffix + '.h5')
+        except:
+            logger.error("failed to load server params; re-initializing server params")
 
     threads = []
     for thread_id in range(0, args.num_learners):
         thread = threading.Thread(target=_learner_thread, args=(
-            thread_args, thread_id, (emb_params, actor_params, critic_params), (emb_lock, ddpg_lock)))
+            thread_args, sess, thread_id, (emb_params, actor_params, critic_params), (emb_lock, ddpg_lock)))
         threads.append(thread)
         thread.start()
     logger.info("started %d learner threads" % (len(threads)))
@@ -364,13 +378,16 @@ if __name__ == "__main__":
 
         # save params
         emb_lock.acquire()
-        server_emb.autoencoder.set_weights(emb_params)
-        server_emb.autoencoder.save_weights('embedder_server' + args.model_weights_suffix + '.h5')
+        # server_emb.autoencoder.set_weights(emb_params)
+        np.save('embedder_server' + args.model_weights_suffix + '.npy', emb_params)
+        # server_emb.autoencoder.save_weights('embedder_server' + args.model_weights_suffix + '.h5')
         emb_lock.release()
         ddpg_lock.acquire()
-        server_actor.model.set_weights(actor_params)
-        server_actor.model.save_weights('actor_server' + args.model_weights_suffix + '.h5')
-        server_critic.model.set_weights(critic_params)
-        server_critic.model.save_weights('critic_server' + args.model_weights_suffix + '.h5')
+        # server_actor.model.set_weights(actor_params)
+        np.save('actor_server' + args.model_weights_suffix + '.npy', actor_params)
+        # server_actor.model.save_weights('actor_server' + args.model_weights_suffix + '.h5')
+        # server_critic.model.set_weights(critic_params)
+        np.save('critic_server' + args.model_weights_suffix + '.npy', critic_params)
+        # server_critic.model.save_weights('critic_server' + args.model_weights_suffix + '.h5')
         ddpg_lock.release()
         logger.info("saving server params")

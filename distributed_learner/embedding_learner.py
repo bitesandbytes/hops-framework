@@ -17,7 +17,8 @@ class EmbeddingLearner(object):
     # emd_size = NxZ
     def __init__(self, args):
         #self.sess = args['sess']
-        self.sess = tf.Session()
+        # self.sess = tf.Session()
+        self.sess = K.get_session()
         self.state_size = args['state_size']
         self.goal_size = args['goal_size']
         self.embedding_size = args['emb_size']
@@ -46,7 +47,7 @@ class EmbeddingLearner(object):
 
         self.encoder = Model(input=[S, G], output=emb_layer)
 
-        K.set_session(self.sess)
+        #K.set_session(self.sess)
 
         self.sess.run(tf.global_variables_initializer())
 
