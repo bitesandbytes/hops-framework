@@ -29,14 +29,14 @@ class EmbeddingLearner(object):
         # Build encoder from here
         S = Input(shape=(self.state_size,), name='state')
         G = Input(shape=(self.goal_size,), name='goal')
-        S0 = Dense(self.state_size * 2, activation='relu')(S)
-        G0 = Dense(self.goal_size * 2, activation='relu')(G)
+        S0 = Dense(self.state_size * 5, activation='relu')(S)
+        G0 = Dense(self.goal_size * 5, activation='relu')(G)
         # C = merge.Concatenate([S0, G0])#, axis=1)
         C = merge([S0, G0], mode='concat')
         emb_layer = Dense(self.embedding_size, activation='relu')(C)
         # Build decoder from here
-        S1 = Dense(self.state_size * 2, activation='relu')(emb_layer)
-        G1 = Dense(self.goal_size * 2, activation='relu')(emb_layer)
+        S1 = Dense(self.state_size * 5, activation='relu')(emb_layer)
+        G1 = Dense(self.goal_size * 5, activation='relu')(emb_layer)
         S2 = Dense(self.state_size, activation='relu')(S1)
         G2 = Dense(self.goal_size, activation='relu')(G1)
         # combine to form autoencoder
