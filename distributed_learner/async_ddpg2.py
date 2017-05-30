@@ -8,82 +8,135 @@ import time
 import keras.backend as K
 import tensorflow as tf
 
-from actor_keras import ActorNetwork
-from critic_keras import CriticNetwork
-from embedding_learner import EmbeddingLearner
+from networks import create_actor, create_critic, create_emb_learner
 from turn_env import AntTurnEnv
 
+LEARNING_RATE = 0.001
+NUM_CONCURRENT = 1
 
-def _learner_thread(args, sess, thread_id, sync_weights, locks):
+# global
+NUM_EPOCHS = 2
+NUM_EPISODES_PER_EPOCH = 2
+MAX_EPISODE_LEN = 5
+RESET_TARGET_NETWORK_EPOCHS = 2
+
+# main params
+STATE_SIZE = 29
+EMB_SIZE = 30
+GOAL_SIZE = 1
+ACTION_SIZE = 23
+
+# env
+VREP_PORT = 10000
+PER_STEP_REWARD = -0.01
+FINAL_REWARD = 10
+TOLERANCE = 0.087
+SPAWN_RADIUS = 6
+
+
+def _learner_thread(thread_id, session_global, graph_ops):
     logger = logging.getLogger("learner")
-    # sess = tf.Session(config=tf.ConfigProto(inter_op_parallelism_threads=1,
-    #                                           intra_op_parallelism_threads=1))
-    K.set_session(sess)
+    logger.info("thread_id:%d" % thread_id)
+    '''
+    # feed tensors
+    tstate = graph_ops["states"]
+    taction = graph_ops["actions"]
+    tq_values = graph_ops["q_values"]
 
-    emb_lock, ddpg_lock = locks[0], locks[1]
-    emb_server, actor_server, critic_server = sync_weights[0], sync_weights[1], sync_weights[2]
-    update_rate = args['server_update_rate']
-    emb_out_of_sync, ddpg_out_of_sync = 0, 0
-    emb_max_out_of_sync, ddpg_max_out_of_sync = args['emb_max_out_of_sync'], args['ddpg_max_out_of_sync']
+    # critic ops
+    critic_q_values = graph_ops["critic_q_values"]
+    critic_q_a_grads = graph_ops["critic_q_a_grads"]
+    critic_optimize = graph_ops["critic_optimize"]
 
-    env_args = args['env_args']
-    # init Actor, Critic and EMB networks
+    # actor ops
+    actor_actions = graph_ops["actor_actions"]
+    #actor_grads_op = graph_ops["actor_grads_op"]
+    actor_optimize = graph_ops["actor_optimize"]
+    '''
+    # params tensors
+    actor_params = graph_ops["actor_params"]
+    critic_params = graph_ops["critic_params"]
+    ae_params = graph_ops["ae_params"]
+    e_params = graph_ops["e_params"]
 
-    # args['actor_args']['sess'] = K.get_session()
-    # args['critic_args']['sess'] = K.get_session()
-    # args['emb_args']['sess'] = K.get_session()
+    env = AntTurnEnv({
+        'server_ip': '127.0.0.1',
+        'server_port': VREP_PORT + thread_id,
+        'vrep_exec_path': None,
+        'vrep_scene_file': None,
+        'per_step_reward': PER_STEP_REWARD,
+        'final_reward': FINAL_REWARD,
+        'tolerance': TOLERANCE,
+        'spawn_radius': SPAWN_RADIUS
+    })
 
-    with sess.graph.as_default():
-        actor = ActorNetwork(args['actor_args'])
-        critic = CriticNetwork(args['critic_args'])
-        embedder = EmbeddingLearner(args['emb_args'])
-        env = AntTurnEnv({
-            'server_ip': '127.0.0.1',
-            'server_port': env_args['vrep_port'] + thread_id,
-            'vrep_exec_path': env_args['vrep_exec_path'],
-            'vrep_scene_file': env_args['vrep_scene_file'],
-            'per_step_reward': env_args['per_step_reward'],
-            'final_reward': env_args['final_reward'],
-            'tolerance': env_args['tolerance'],
-            'spawn_radius': env_args['spawn_radius']
-        })
+    gamma = 0.99
+    with tf.Graph().as_default(), tf.Session() as session:
+        # make local networks
+        lstate = tf.placeholder(tf.float32, [None, STATE_SIZE])
+        lgoal = tf.placeholder(tf.float32, [None, GOAL_SIZE])
+        laction = tf.placeholder(tf.float32, [None, ACTION_SIZE])
+        lemb = tf.placeholder(tf.float32, [None, EMB_SIZE])
 
-        gamma = args['gamma']
+        lae_model, le_model = create_emb_learner(STATE_SIZE, GOAL_SIZE, EMB_SIZE)
+        lactor, lact_grad, lactor_grads = create_actor(EMB_SIZE, ACTION_SIZE, LEARNING_RATE)
+        lcritic, l_action_grads = create_critic(EMB_SIZE, ACTION_SIZE, LEARNING_RATE)
 
-        # load N/W weights
-        if args['load_params']:
-            try:
-                embedder.autoencoder.load_weights(
-                    'embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-                actor.model.load_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-                actor.target_model.load_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-                critic.model.load_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-                critic.target_model.load_weights(
-                    'critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
-                logger.info("loaded weights from file, resuming training")
-            except:
-                logger.error("unable to load learner thread params; re-initializing")
-                pass
+        # basics
+        ltarget_state = tf.placeholder(tf.float32, [None, STATE_SIZE])
+        ltarget_goal = tf.placeholder(tf.float32, [None, GOAL_SIZE])
+        lae_values = lae_model([lstate, lgoal])
+        lae_out_s, lae_out_g = lae_values[0], lae_values[1]
+        lembs = le_model([lstate, lgoal])
+        lq_values = lcritic([lemb, laction])
+        lactor_action = lactor([lemb])
 
-        for epoch in range(0, args['num_epochs']):
-            cur_states = np.zeros((0, args['state_size']))
-            cur_goals = np.zeros((0, args['goal_size']))
-            next_states = np.zeros((0, args['state_size']))
-            next_goals = np.zeros((0, args['goal_size']))
-            actions = np.zeros((0, args['action_size']))
+        # emb training
+        emb_loss = tf.reduce_mean(tf.square(lae_out_s - ltarget_state)) + \
+                   tf.reduce_mean(tf.square(lae_out_g - ltarget_goal))
+        ae_grads = K.gradients(emb_loss, lae_model.trainable_weights)
+        ae_full_grads = K.function(inputs=[lstate, lgoal, ltarget_state, ltarget_goal], outputs=ae_grads)
+
+        # obtain critic grad_Q_wrt_a
+        l_grad_Q_wrt_a = K.function(inputs=[lcritic.inputs[0], lcritic.inputs[1]], outputs=l_action_grads)
+        # obtain full actor grads
+        l_actor_full_grads = K.function(inputs=[lactor.inputs[0], lact_grad], outputs=lactor_grads)
+
+        # obtain full critic gradients
+        target_qs = tf.placeholder(tf.float32, [None, 1])
+        critic_loss = tf.reduce_mean(tf.square(target_qs - lq_values))
+        critic_grads = K.gradients(critic_loss, lcritic.trainable_weights)
+        l_critic_full_grads = K.function(inputs=[lemb, laction, target_qs], outputs=critic_grads)
+
+        lactor_params = lactor.trainable_weights
+        lcritic_params = lcritic.trainable_weights
+        lae_params = lae_model.trainable_weights
+        lactor_set_params = lambda x: [lactor_params[i].assign(x[i]) for i in range(len(x))]
+        lcritic_set_params = lambda x: [lcritic_params[i].assign(x[i]) for i in range(len(x))]
+        lae_set_params = lambda x: [lae_params[i].assign(x[i]) for i in range(len(x))]
+
+        session.run(tf.global_variables_initializer())
+
+        for epoch in range(0, NUM_EPOCHS):
+            cur_states = np.zeros((0, 29))
+            cur_goals = np.zeros((0, 1))
+            next_states = np.zeros((0, 29))
+            next_goals = np.zeros((0, 1))
+            actions = np.zeros((0, 23))
             rewards = np.zeros((0, 1))
-            is_final = np.zeros((0, 1))
+            non_terminal = np.zeros((0, 1))
 
-            for episode in range(0, args['num_episodes_per_epoch']):
+            for episode in range(0, NUM_EPISODES_PER_EPOCH):
                 rand_goal = np.random.uniform(-np.pi, +np.pi)
-                logger.info("starting - epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
+                logger.info("START:epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
                 env.set_goal(rand_goal)
                 # cur_goal = randomly generated starting goal
                 cur_state, cur_goal = env.start()
                 next_state, next_goal = cur_state, cur_goal
                 num_steps = 0
-                for step_no in range(0, args['max_episode_length']):
-                    action = actor.target_model.predict(embedder.embed(cur_state, cur_goal))
+                for step_no in range(0, MAX_EPISODE_LEN):
+                    emb = session.run(lembs, feed_dict={lstate: cur_state, lgoal: cur_goal}).reshape((1, -1))
+                    action = session.run(lactor_action, feed_dict={lemb: emb})[0].reshape((1, -1))
                     # NOTE : adding a small random noise to system
                     action += np.random.normal(loc=0.0, scale=0.2, size=action.shape)
                     next_state, next_goal, reward, has_ended = env.step(action)
@@ -93,45 +146,83 @@ def _learner_thread(args, sess, thread_id, sync_weights, locks):
                     next_goals = np.vstack((next_goals, next_goal))
                     rewards = np.vstack((rewards, reward))
                     if has_ended:
-                        is_final = np.vstack((is_final, 0.0))
+                        non_terminal = np.vstack((non_terminal, 0.0))
                     else:
-                        is_final = np.vstack((is_final, 1.0))
+                        non_terminal = np.vstack((non_terminal, 1.0))
                     actions = np.vstack((actions, action))
                     num_steps += 1
                     if has_ended:
                         logger.info("achieved goal")
-                        break
+                    break
                     cur_state = next_state
                     cur_goal = next_goal
                 env.reset()
-                logger.info(
-                    "ended - epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
+                logger.info("END:epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
+
+            # embed cur and next values
+            cur_embs = session.run(lembs, feed_dict={lstate: cur_states, lgoal: cur_goals})
+            next_embs = session.run(lembs, feed_dict={lstate: next_states, lgoal: next_goals})
+            # obtain critic q-values
+            q_values = session.run(lq_values, feed_dict={lemb: next_embs, laction: actions}).reshape((-1, 1))
+            # obtain targets for critic
+            targets = rewards + gamma * np.multiply(non_terminal, q_values).reshape((-1, 1))
+
+            # compute full emb grads
+            full_emb_grads = ae_full_grads([cur_states, cur_goals, cur_states, cur_goals])
+            graph_ops["ae_grad_copy"](full_emb_grads)
+            session_global.run(graph_ops["ae_grad_apply"])
+
+            # compute full actor and critic grads
+            # actor update
+            local_action_grads = l_grad_Q_wrt_a([cur_embs, actions])[0]
+            full_local_actor_grads = l_actor_full_grads([cur_embs, local_action_grads])
+            graph_ops["actor_grad_copy"](full_local_actor_grads)
+            session_global.run(graph_ops["actor_grad_apply"])
+
+            # critic update
+            full_local_critic_grads = l_critic_full_grads([cur_embs, actions, targets])
+            graph_ops["critic_grad_copy"](full_local_critic_grads)
+            session_global.run(graph_ops["critic_grad_apply"])
+
+            # if out of sync, re-sync target networks with server
+            if np.mod(epoch, RESET_TARGET_NETWORK_EPOCHS) == 0:
+                local_params = [session_global.run(param) for param in ae_params]
+                lae_set_params(local_params)
+                local_params = [session_global.run(param) for param in actor_params]
+                lactor_set_params(local_params)
+                local_params = [session_global.run(param) for param in critic_params]
+                lcritic_set_params(local_params)
+
+            # logger.info("bulk_q_values.shape:%s" % str(bulk_q_values.shape))
+
+            # get action grads
+            # epoch_critic_a_grads = session.run(critic_a_grads, feed_dict={state:cur_states, action:actions})[0]
+            # epoch_actor_grads = session.run(, feed_dict={})
+            '''
             # EMB train & update
             # train EMB
             embedder.fit(states=cur_states, goals=cur_goals)
             logger.info("EMB fit")
             # EMB update
             emb_lock.acquire()
-            '''
+            
             cur_weights = embedder.autoencoder.get_weights()
             target_weights = emb_server_net.autoencoder.get_weights()
             for i in xrange(len(cur_weights)):
                 target_weights[i] = (1 - update_rate) * target_weights[i] + update_rate * cur_weights[i]
-
+    
             emb_server_net.autoencoder.set_weights(target_weights)
-            '''
             emb_local = embedder.autoencoder.get_weights()
             for i in xrange(len(emb_server)):
                 emb_server[i] = ((1 - update_rate) * emb_server[i] + update_rate * emb_local[i]).reshape(
                     emb_server[i].shape)
             emb_out_of_sync += 1
-
+    
             if emb_out_of_sync == emb_max_out_of_sync:
                 embedder.autoencoder.set_weights(emb_server)
                 emb_out_of_sync = 0
                 logger.info("EMB synced")
             emb_lock.release()
-
             # DDPG train & update
             # DDPG train
             cur_embs, next_embs = embedder.embed(cur_states, cur_goals), embedder.embed(next_states, next_goals)
@@ -157,7 +248,7 @@ def _learner_thread(args, sess, thread_id, sync_weights, locks):
             for i in xrange(len(critic_server)):
                 critic_server[i] = ((1 - update_rate) * critic_server[i] + update_rate * critic_local[i]).reshape(
                     critic_server[i].shape)
-
+    
             ddpg_out_of_sync += 1
             if ddpg_out_of_sync == ddpg_max_out_of_sync:
                 actor.target_model.set_weights(actor_server)
@@ -167,7 +258,7 @@ def _learner_thread(args, sess, thread_id, sync_weights, locks):
                 ddpg_out_of_sync = 0
                 logger.info("DDPG synced")
             ddpg_lock.release()
-
+            
             # save network params
             if np.mod(epoch, args['save_every_x_epochs']) == 0:
                 embedder.autoencoder.save_weights(
@@ -178,7 +269,7 @@ def _learner_thread(args, sess, thread_id, sync_weights, locks):
                 critic.target_model.save_weights(
                     'critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
                 logger.info("params saved")
-
+    
             if np.mod(epoch, args['eval_every_x_epochs']) == 0:
                 logger.info("model eval at epoch %d" % epoch)
                 # average of 5 tries
@@ -204,7 +295,7 @@ def _learner_thread(args, sess, thread_id, sync_weights, locks):
                 avg_reward /= 5.0
                 avg_num_steps /= 5.0
                 logger.info("avg_reward:%f, avg_num_steps:%f" % (avg_reward, avg_num_steps))
-
+    
         # Save network params one last time
         embedder.autoencoder.save_weights('embedder_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
         actor.model.save_weights('actor_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
@@ -212,9 +303,81 @@ def _learner_thread(args, sess, thread_id, sync_weights, locks):
         critic.model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
         critic.target_model.save_weights('critic_thread' + str(thread_id) + args['model_weights_suffix'] + '.h5')
         logger.info("learning complete; thread exiting")
+        '''
+        logger.info("EXIT")
 
 
-if __name__ == "__main__":
+def setup_graph(state_size, goal_size, emb_size, action_size):
+    # states = tf.placeholder(tf.float32, [None, STATE_SIZE])
+    # goals = tf.placeholder(tf.float32, [None, GOAL_SIZE])
+    # embs = tf.placeholder(tf.float32, [None, EMB_SIZE])
+    # actions = tf.placeholder(tf.float32, [None, ACTION_SIZE])
+    actor, action_grad_ph, actor_grads = create_actor(emb_size, action_size, LEARNING_RATE)
+    critic, q_action_grads = create_critic(emb_size, action_size, LEARNING_RATE)
+    ae_model, e_model = create_emb_learner(state_size, goal_size, emb_size)
+
+    # params
+    actor_params = actor.trainable_weights
+    critic_params = critic.trainable_weights
+    ae_params = ae_model.trainable_weights
+    e_params = e_model.trainable_weights
+    actor_grads = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False) for tv in actor_params]
+    actor_grad_copy = lambda x: [actor_grads[i].assign(x[i]) for i in xrange(len(x))]
+    actor_grad_apply = tf.train.AdamOptimizer(LEARNING_RATE).apply_gradients(zip(actor_grads, actor_params))
+    critic_grads = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False) for tv in critic_params]
+    critic_grad_copy = lambda x: [critic_grads[i].assign(x[i]) for i in xrange(len(x))]
+    critic_grad_apply = tf.train.AdamOptimizer(LEARNING_RATE).apply_gradients(zip(critic_grads, critic_params))
+    ae_grads = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False) for tv in ae_params]
+    ae_grad_copy = lambda x: [ae_grads[i].assign(x[i]) for i in xrange(len(x))]
+    ae_grad_apply = tf.train.AdamOptimizer(LEARNING_RATE).apply_gradients(zip(ae_grads, ae_params))
+
+    graph_ops = {
+        "actor_grads": actor_grads,  # grads for actor
+        "actor_grad_copy": actor_grad_copy,
+        "actor_grad_apply": actor_grad_apply,
+        "critic_grads": critic_grads,  # grads for critic
+        "critic_grad_copy": critic_grad_copy,
+        "critic_grad_apply": critic_grad_apply,
+        "ae_grads": ae_grads,  # grads for emb
+        "ae_grad_copy": ae_grad_copy,
+        "ae_grad_apply": ae_grad_apply,
+        "actor_params": actor_params,  # network params
+        "critic_params": critic_params,
+        "ae_params": ae_params,
+        "e_params": e_params
+    }
+    return graph_ops
+
+
+'''
+# placeholders
+"states": states,
+"actions": actions,
+"q_values": q_values,
+# actor ops
+"actor_actions": actor_actions,
+#"actor_grads_op": actor_grads_op,
+"actor_optimize": actor_optimize,
+# critic ops
+"critic_q_values": q_values,
+"critic_q_a_grads": critic_q_a_grads,
+"critic_optimize": critic.train_on_batch,
+'''
+
+
+def train(session, graph_ops):
+    session.run(tf.global_variables_initializer())
+    # writer = tf.summary.FileWriter(SUMMARY_SAVE_PATH, session.graph)
+    actor_learner_threads = [threading.Thread(target=_learner_thread, args=(thread_id, session, graph_ops)) for
+                             thread_id in range(NUM_CONCURRENT)]
+    for t in actor_learner_threads:
+        t.start()
+
+    for t in actor_learner_threads:
+        t.join()
+
+
+def other_func():
     os.chdir("../")
     # init parser
     parser = argparse.ArgumentParser(description="Parallel Asynchronous DDPG with Embedding Learner")
@@ -392,3 +555,22 @@ if __name__ == "__main__":
         # server_critic.model.save_weights('critic_server' + args.model_weights_suffix + '.h5')
         ddpg_lock.release()
         logger.info("saving server params")
+
+
+def main(_):
+    logger = logging.getLogger("learner")
+    logger.setLevel(logging.INFO)
+    fh = logging.FileHandler("log_file.txt")
+    formatter = logging.Formatter("%(levelname)s:%(thread)d:%(filename)s:%(funcName)s:%(asctime)s::%(message)s")
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+
+    g = tf.Graph()
+    with g.as_default(), tf.Session() as session:
+        K.set_session(session)
+        graph_ops = setup_graph(STATE_SIZE, GOAL_SIZE, EMB_SIZE, ACTION_SIZE)
+        train(session, graph_ops)
+
+
+if __name__ == "__main__":
+    tf.app.run(main=main)

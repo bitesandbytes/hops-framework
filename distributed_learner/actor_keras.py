@@ -50,11 +50,13 @@ class ActorNetwork(object):
 
     def create_actor_network(self, state_size, action_dim):
         logging.getLogger("learner").info("building actor")
-        S = Input(shape=[state_size, ])
+        S = Input(shape=[state_size, ], name='actor_input')
         # HIDDEN1_UNITS=100, relu
-        h0 = Dense(self.network_config['hlayer_1_size'], activation=self.network_config['hlayer_1_type'])(S)
+        h0 = Dense(self.network_config['hlayer_1_size'], activation=self.network_config['hlayer_1_type'],
+                   name='actor_h0')(S)
         # HIDDEN2_UNITS=200, relu
-        h1 = Dense(self.network_config['hlayer_2_size'], activation=self.network_config['hlayer_2_type'])(h0)
-        A = Dense(action_dim, activation='tanh', init=TruncatedNormal(stddev=0.5))(h1)
+        h1 = Dense(self.network_config['hlayer_2_size'], activation=self.network_config['hlayer_2_type'],
+                   name='actor_h1')(h0)
+        A = Dense(action_dim, activation='tanh', init=TruncatedNormal(stddev=0.5), name='actor_A')(h1)
         model = Model(input=S, output=A)
         return model, model.trainable_weights, S

@@ -66,7 +66,7 @@ class CriticNetwork(object):
         # HIDDEN2_UNITS, linear
         h3 = Dense(self.network_config['prefinal_layer_size'],
                    activation=self.network_config['prefinal_layer_type'])(h2)
-        V = Dense(action_dim, activation='linear')(h3)
+        V = Dense(1, activation='linear')(h3)
         model = Model(input=[S, A], output=V)
         adam = Adam(lr=self.learning_rate)
         model.compile(loss='mse', optimizer=adam)
