@@ -1,9 +1,9 @@
 import logging
-import numpy as np
 import threading
 import time
 
 import keras.backend as K
+import numpy as np
 import tensorflow as tf
 from scipy.io import savemat
 
@@ -11,19 +11,19 @@ from networks import create_actor, create_critic, create_emb_learner
 from turn_env import AntTurnEnv
 
 LEARNING_RATE = 0.001
-NUM_CONCURRENT = 2
+NUM_CONCURRENT = 1
 
 # global
-NUM_EPOCHS = 2
+NUM_EPOCHS = 30
 NUM_EPISODES_PER_EPOCH = 3
-MAX_EPISODE_LEN = 5
-RESET_TARGET_NETWORK_EPOCHS = 2
-MODEL_WEIGHTS_SUFFIX = "test"
-SUMMARY_PREFIX = "test"
+MAX_EPISODE_LEN = 10000
+RESET_TARGET_NETWORK_EPOCHS = 1
+MODEL_WEIGHTS_SUFFIX = "test0"
+SUMMARY_PREFIX = "test0"
 
 # main params
 STATE_SIZE = 29
-EMB_SIZE = 30
+EMB_SIZE = 40
 GOAL_SIZE = 1
 ACTION_SIZE = 23
 
@@ -289,7 +289,8 @@ def train(session, models, graph_ops):
                        'thread_emb_loss': thread_emb_loss, 'thread_episodic_reward': thread_episodic_reward,
                        'thread_goals': thread_goals, 'thread_num_steps': thread_num_steps})
 
-        time.sleep(20)
+        # wake up every 60 seconds
+        time.sleep(60)
 
     # save global params one last time
     models[0].save_weights('actor_server_' + MODEL_WEIGHTS_SUFFIX + '.h5')
@@ -301,14 +302,6 @@ def train(session, models, graph_ops):
             mdict={'thread_goals_achieved': thread_goals_achieved, 'thread_critic_loss': thread_critic_loss,
                    'thread_emb_loss': thread_emb_loss, 'thread_episodic_reward': thread_episodic_reward,
                    'thread_goals': thread_goals, 'thread_num_steps': thread_num_steps})
-    '''
-    savemat(SUMMARY_PREFIX + "goal_percentage.mat", mdict={'thread_goals_achieved':thread_goals_achieved})
-    savemat(SUMMARY_PREFIX + "critic_loss.mat", mdict={'thread_critic_loss':thread_critic_loss})
-    savemat(SUMMARY_PREFIX + "emb_loss.mat", mdict={'thread_emb_loss':thread_emb_loss})
-    savemat(SUMMARY_PREFIX + "episodic_reward.mat", mdict={'thread_episodic_reward':thread_episodic_reward})
-    savemat(SUMMARY_PREFIX + "episode_goals.mat", mdict={'thread_goals':thread_goals})
-    savemat(SUMMARY_PREFIX + "episode_len.mat", mdict={'thread_num_steps':thread_num_steps})
-    '''
 
 
 def main(_):

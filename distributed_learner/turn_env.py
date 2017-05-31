@@ -1,6 +1,7 @@
 import logging
-import numpy as np
 import time
+
+import numpy as np
 
 from hexapod import Ant
 
@@ -35,24 +36,30 @@ class AntTurnEnv(object):
 
     def start(self):
         logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
-        self.state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
-        self.begin_angle = self.state[0, -1].item()
-        self.begin_pos = self.state[0, -6:-4]
-        self.goal = _normalize(self.begin_angle + self.delta_theta)
-        return self.state, np.asarray(self.delta_theta).reshape((1, -1))
+        state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
+        begin_angle = state[0, -1].item()
+        self.begin_pos = state[0, -6:-4]
+        self.goal = _normalize(begin_angle + self.delta_theta)
+        return state, np.asarray(self.delta_theta).reshape((1, 1))
 
     def _is_terminal(self, current):
-        if np.absolute(_normalize(current) - self.goal) < self.tolerance:
+        diff = np.absolute(current - self.goal)
+        if diff > np.pi:
+            diff -= 2 * np.pi
+        if diff < self.tolerance:
             return True
         else:
             return False
 
     def step(self, action):
-        # logging.getLogger("learner").info("stepping")
+        logging.getLogger("learner").info("stepping")
         self.ant.set_forces_and_trigger(action)
         new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
         net_displacement = new_state[0, -6:-4] - self.begin_pos
-        new_goal = np.asarray(self.goal - _normalize(new_state[0, -1].item())).reshape((1, -1))
+        new_goal = self.goal - new_state[0, -1].item()
+        if new_goal > np.pi:
+            new_goal -= 2 * np.pi
+        new_goal = np.asarray(new_goal).reshape((1, -1))
         if self._is_terminal(new_state[0, -1].item()):
             disp_reward = -np.linalg.norm(net_displacement)
             return new_state, new_goal, (disp_reward + self.final_reward), True
@@ -65,7 +72,7 @@ class AntTurnEnv(object):
         time.sleep(0.5)
         self.ant.start_simulation()
         spawn_rad = np.random.uniform(-self.spawn_radius, +self.spawn_radius)
-        angle = np.random.uniform(0, 2 * np.pi)
+        angle = np.random.uniform(-np.pi, np.pi)
         self.ant.set_position_and_rotation(spawn_rad * np.asarray((np.cos(angle), np.sin(angle))),
                                            np.random.uniform(-np.pi, +np.pi))
         # NOTE : use this only if the stop_simulation() and set_position_and_rotation() doesn't cut it
