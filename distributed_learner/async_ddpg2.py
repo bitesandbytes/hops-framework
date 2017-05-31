@@ -1,9 +1,9 @@
 import logging
+import numpy as np
 import threading
 import time
 
 import keras.backend as K
-import numpy as np
 import tensorflow as tf
 from scipy.io import savemat
 
@@ -16,7 +16,7 @@ NUM_CONCURRENT = 1
 # global
 NUM_EPOCHS = 30
 NUM_EPISODES_PER_EPOCH = 3
-MAX_EPISODE_LEN = 10000
+MAX_EPISODE_LEN = 100
 RESET_TARGET_NETWORK_EPOCHS = 1
 MODEL_WEIGHTS_SUFFIX = "test0"
 SUMMARY_PREFIX = "test0"
@@ -137,6 +137,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
                 env.set_goal(rand_goal)
                 # cur_goal = randomly generated starting goal
                 cur_state, cur_goal = env.start()
+                logger.info("cur_state:%s" % str(cur_state))
                 thread_goals[thread_id, epoch, episode] = cur_goal
                 next_state, next_goal = cur_state, cur_goal
                 num_steps = 0
@@ -147,6 +148,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
                     # NOTE : adding a small random noise to system
                     action += np.random.normal(loc=0.0, scale=0.2, size=action.shape)
                     next_state, next_goal, reward, has_ended = env.step(action)
+                    logger.info("next_state:%s" % str(next_state))
                     cur_states = np.vstack((cur_states, cur_state))
                     next_states = np.vstack((next_states, next_state))
                     cur_goals = np.vstack((cur_goals, cur_goal))

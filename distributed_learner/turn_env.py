@@ -1,7 +1,6 @@
 import logging
-import time
-
 import numpy as np
+import time
 
 from hexapod import Ant
 
@@ -26,8 +25,6 @@ class AntTurnEnv(object):
         self.tolerance = args['tolerance']
         self.server_ip, self.server_port = args['server_ip'], args['server_port']
         self.spawn_radius = args['spawn_radius']
-        self.state = None
-        self.begin_angle = None
         self.begin_pos = None
         self.goal = None
 
@@ -37,10 +34,14 @@ class AntTurnEnv(object):
     def start(self):
         logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
         state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
-        begin_angle = state[0, -1].item()
-        self.begin_pos = state[0, -6:-4]
-        self.goal = _normalize(begin_angle + self.delta_theta)
-        return state, np.asarray(self.delta_theta).reshape((1, 1))
+        begin_angle = self.ant.start_orientation[0, -1].item()
+        self.begin_pos = self.ant.start_pos[0, 1:3]
+        self.goal = begin_angle + self.delta_theta
+        if self.goal > np.pi:
+            self.goal -= 2 * np.pi
+        elif self.goal < -np.pi:
+            self.goal += 2 * np.pi
+        return state, np.asarray(self.delta_theta).reshape((1, -1))
 
     def _is_terminal(self, current):
         diff = np.absolute(current - self.goal)

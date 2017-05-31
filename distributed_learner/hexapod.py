@@ -5,7 +5,6 @@ Interface to control Ant hexapod robot, in one of two modes:
 """
 
 import logging
-
 import numpy as np
 
 import vrep
@@ -34,13 +33,13 @@ class Ant(object):
 
         # Enable synchronous mode
         e = vrep.simxSynchronous(self.client_id, True)
-        self.logger.info("simxSynchronous=%d"%e)
+        self.logger.info("simxSynchronous=%d" % e)
         if e != 0:
             self.logger.critical('Failed enabling remote API synchronous mode')
 
         # Start simulation
         e = vrep.simxStartSimulation(self.client_id, vrep.simx_opmode_blocking)
-        self.logger.info("simxStartSimulation=%d"%e)
+        self.logger.info("simxStartSimulation=%d" % e)
         if e != 0:
             self.logger.critical('Failed to start simulation')
 
@@ -88,10 +87,22 @@ class Ant(object):
         self.joint_count = len(self.handles)
 
         # log these for consistency
-        self.start_pos = self.get_position()
-        self.start_orientation = self.get_orientation()
-
+        self.start_pos = self._get_position()
+        self.start_orientation = self._get_orientation()
+        jpos = self.get_joint_pos()
         '''
+        correct = False
+        while not correct:
+            correct = True
+            if np.all(self.start_pos == 0):
+                correct = False
+            if np.all(self.start_orientation == 0):
+                correct = False
+            if np.all(jpos == 0):
+                correct = False
+            time.sleep(0.1)
+        logging.getLogger("learner").info("started sim")
+        
         # Configure them to have almost infinite target velocity
         # Use only if in pure Force/Torque mode without position control (PID)
         _ = vrep.simxPauseCommunication(self.client_id, True);
@@ -119,17 +130,18 @@ class Ant(object):
         jpos = np.zeros((self.joint_count))
         for handle_idx in range(0, self.joint_count):
             _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
-                                                            vrep.simx_opmode_blocking)
+                                                            vrep.simx_opmode_streaming)
         return jpos.reshape((1, -1))
 
     # returns euler orientation (alpha, beta, gamma) for the body
     def get_orientation(self):
-        _, euler_angles = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_blocking)
+        _, euler_angles = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1,
+                                                        vrep.simx_opmode_streaming)
         return np.asarray((euler_angles[0], euler_angles[1], euler_angles[2])).reshape((1, -1))
 
     # returns Cartesian coordinates (x,y,z) for the body
     def get_position(self):
-        _, position = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_blocking)
+        _, position = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
         return np.asarray((position[0], position[1], position[2])).reshape((1, -1))
 
     # copy functions using blocking mode instead of streaming to get correct values
@@ -144,12 +156,12 @@ class Ant(object):
 
     # set (x,y) position and rotation about z-axis
     def set_position_and_rotation(self, position, rotation):
-        #time.sleep(0.2)
+        # time.sleep(0.2)
         empty_buff = bytearray()
         args = [position[0], position[1], self.start_pos[0, 2], self.start_orientation[0, 0],
                 self.start_orientation[0, 1],
                 rotation]
-        self.logger.info("args:%s"%str(args))
+        self.logger.info("args:%s" % str(args))
         res, ret_ints, ret_floats, ret_strings, ret_buffer = vrep.simxCallScriptFunction(self.client_id, 'Ant',
                                                                                          vrep.sim_scripttype_childscript,
                                                                                          'resetScene', [], args, [],
@@ -177,16 +189,30 @@ class Ant(object):
         # required
         self.start_pos = self._get_position()
         self.start_orientation = self._get_orientation()
+        jpos = self.get_joint_pos()
+        '''
+        correct = False
+        while not correct:
+            correct = True
+            if np.all(self.start_pos == 0):
+                correct = False
+            if np.all(self.start_orientation == 0):
+                correct = False
+            if np.all(jpos == 0):
+                correct = False
+            time.sleep(0.1)
+        logging.getLogger("learner").info("started sim")
+        '''
 
     def stop_simulation(self):
         # issue command to stop simulation
         vrep.simxStopSimulation(self.client_id, vrep.simx_opmode_blocking)
         # stop all streaming
-        # for handle_idx in range(0, self.joint_count):
-        #    _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_discontinue)
-        # _, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
-        # _, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
+        for handle_idx in range(0, self.joint_count):
+            _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_discontinue)
 
+        _, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
+        _, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         # Just to make sure this gets executed
         vrep.simxGetPingTime(self.client_id)
         self.logger.info("simulation stopped")
