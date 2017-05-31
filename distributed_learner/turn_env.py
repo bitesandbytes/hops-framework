@@ -1,7 +1,6 @@
 import logging
-import time
-
 import numpy as np
+import time
 
 from hexapod import Ant
 
@@ -15,7 +14,6 @@ def _normalize(theta):
 
 class AntTurnEnv(object):
     def __init__(self, args):
-        # start a VREP headless background process
         self.delta_theta = None
         # subprocess.Popen(
         #    [args['vrep_exec_path'], '-h', '-gREMOTEAPISERVERSERVICE_' + str(args['server_port']) + '_FALSE_TRUE',
@@ -36,7 +34,7 @@ class AntTurnEnv(object):
         self.delta_theta = delta_theta
 
     def start(self):
-        logging.getLogger("learner").info("starting env with goal:%f" % self.delta_theta)
+        logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
         self.state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
         self.begin_angle = self.state[0, -1].item()
         self.begin_pos = self.state[0, -6:-4]
@@ -50,7 +48,7 @@ class AntTurnEnv(object):
             return False
 
     def step(self, action):
-        logging.getLogger("learner").info("stepping")
+        # logging.getLogger("learner").info("stepping")
         self.ant.set_forces_and_trigger(action)
         new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
         net_displacement = new_state[0, -6:-4] - self.begin_pos
@@ -62,7 +60,7 @@ class AntTurnEnv(object):
             return new_state, new_goal, self.per_step_reward, False
 
     def reset(self):
-        logging.getLogger("learner").info("resetting")
+        logging.getLogger("learner").info("ENV::RESET")
         self.ant.stop_simulation()
         time.sleep(0.5)
         self.ant.start_simulation()

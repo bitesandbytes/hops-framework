@@ -1,11 +1,9 @@
-import tensorflow as tf
-import numpy as np
-import random
 import argparse
 
-from replay_buffer import ReplayBuffer
+import tensorflow as tf
+
 from actor_keras import ActorNetwork
-from critic_keras import CriticNetwork
+
 
 def learn(args):
     # init constants from args
@@ -40,6 +38,7 @@ if __name__=="__main__":
     parser.add_argument("model_weights_suffix", help="stand-in for <SUFFIX> in \"actor_<SUFFIX>\" and \"critic_<SUFFIX>\"")
     parser.add_argument("actor_update_rate", type=float, help="update rate for actor network")
     parser.add_argument("critic_update_rate", type=float, help="update rate for critic network")
+    parser.add_argument("target_network_update_rate", type=float, help="update rate to update d")
     parser.add_argument("num_episodes_per_update", type=int, help="number of episodes to run before making an update")
     parser.add_argument("ddpg_max_out_of_sync", type=int, help="DDPG - max number of updates to parameter server before asking for sync")
     parser.add_argument("emb_max_out_of_sync", type=int, help="EMB - max number of updates to parameter server before asking for sync")
@@ -50,5 +49,11 @@ if __name__=="__main__":
     parser.add_argument("ddpg_server_sync_port", type=int, help="port # for sync with DDPG parameter server")
     parser.add_argument("emb_server_update_port", type=int, help="port # for updates to EMB parameter server")
     parser.add_argument("emb_server_sync_port", type=int, help="port # for sync with EMB parameter server")
+    parser.add_argument("batch_size", type=int, help="batch size for learning")
+
+
     # start learning
+    critic_network_args = {
+        batch_size:
+    }
     pass
