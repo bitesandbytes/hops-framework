@@ -7,6 +7,7 @@ Interface to control Ant hexapod robot, in one of two modes:
 import logging
 import numpy as np
 import thread
+
 import vrep
 
 
@@ -95,10 +96,10 @@ class Ant(object):
         # log these for consistency
         self.start_pos = self._get_position()
         self.start_orientation = self._get_orientation()
-	pos = self.get_position()
-	ori = self.get_orientation()
+        pos = self.get_position()
+        ori = self.get_orientation()
         jpos = self.get_joint_pos()
-	jvel = self.get_joint_vel()
+        jvel = self.get_joint_vel()
         '''
         correct = False
         while not correct:
@@ -136,19 +137,19 @@ class Ant(object):
 
     # Get joint positions
     def get_joint_pos(self):
-        jpos = np.zeros((self.joint_count))
+        jpos = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
             _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
                                                             vrep.simx_opmode_streaming)
-        return jpos.reshape((1, -1))
+        return jpos
 
     # Get joint velocities
     def get_joint_vel(self):
-        jvel = np.zeros((self.joint_count))
+        jvel = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
             _, jvel[handle_idx] = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
-                                                            vrep.simx_opmode_streaming)
-        return jvel.reshape((1, -1))
+                                                                   vrep.simx_opmode_streaming)
+        return jvel
 
     # returns euler orientation (alpha, beta, gamma) for the body
     def get_orientation(self):
@@ -207,6 +208,7 @@ class Ant(object):
         self.start_pos = self._get_position()
         self.start_orientation = self._get_orientation()
         jpos = self.get_joint_pos()
+        jvel = self.get_joint_vel()
         '''
         correct = False
         while not correct:
@@ -227,6 +229,10 @@ class Ant(object):
         # stop all streaming
         for handle_idx in range(0, self.joint_count):
             _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_discontinue)
+
+        for handle_idx in range(0, self.joint_count):
+            _, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
+                                                    vrep.simx_opmode_discontinue)
 
         _, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
