@@ -6,7 +6,7 @@ Interface to control Ant hexapod robot, in one of two modes:
 
 import logging
 import numpy as np
-
+import thread
 import vrep
 
 
@@ -30,18 +30,24 @@ class Ant(object):
         self.client_id = vrep.simxStart(self.server_ip, self.server_port, True, True, 5000, 5)
         if self.client_id == -1:
             self.logger.critical('Failed connecting to remote API server')
+            self.logger.critical('EXIT')
+            thread.exit()
 
         # Enable synchronous mode
         e = vrep.simxSynchronous(self.client_id, True)
         self.logger.info("simxSynchronous=%d" % e)
         if e != 0:
             self.logger.critical('Failed enabling remote API synchronous mode')
+            self.logger.critical('EXIT')
+            thread.exit()
 
         # Start simulation
         e = vrep.simxStartSimulation(self.client_id, vrep.simx_opmode_blocking)
         self.logger.info("simxStartSimulation=%d" % e)
         if e != 0:
             self.logger.critical('Failed to start simulation')
+            self.logger.critical('EXIT')
+            thread.exit()
 
         # Print ping time
         sec, msec = vrep.simxGetPingTime(self.client_id)
@@ -89,7 +95,10 @@ class Ant(object):
         # log these for consistency
         self.start_pos = self._get_position()
         self.start_orientation = self._get_orientation()
+	pos = self.get_position()
+	ori = self.get_orientation()
         jpos = self.get_joint_pos()
+	jvel = self.get_joint_vel()
         '''
         correct = False
         while not correct:
@@ -132,6 +141,14 @@ class Ant(object):
             _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
                                                             vrep.simx_opmode_streaming)
         return jpos.reshape((1, -1))
+
+    # Get joint velocities
+    def get_joint_vel(self):
+        jvel = np.zeros((self.joint_count))
+        for handle_idx in range(0, self.joint_count):
+            _, jvel[handle_idx] = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
+                                                            vrep.simx_opmode_streaming)
+        return jvel.reshape((1, -1))
 
     # returns euler orientation (alpha, beta, gamma) for the body
     def get_orientation(self):

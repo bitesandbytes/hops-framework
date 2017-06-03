@@ -33,7 +33,7 @@ class AntTurnEnv(object):
 
     def start(self):
         logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
-        state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
+        state = np.hstack((self.ant.get_joint_pos(), self.ant.get_joint_vel(), self.ant.get_orientation()))
         begin_angle = self.ant.start_orientation[0, -1].item()
         self.begin_pos = self.ant.start_pos[0, 1:3]
         self.goal = begin_angle + self.delta_theta
@@ -53,16 +53,15 @@ class AntTurnEnv(object):
             return False
 
     def step(self, action):
-        logging.getLogger("learner").info("stepping")
+        #logging.getLogger("learner").info("stepping")
         self.ant.set_forces_and_trigger(action)
-        new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_position(), self.ant.get_orientation()))
-        net_displacement = new_state[0, -6:-4] - self.begin_pos
+        new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_joint_vel(), self.ant.get_orientation()))
         new_goal = self.goal - new_state[0, -1].item()
         if new_goal > np.pi:
             new_goal -= 2 * np.pi
         new_goal = np.asarray(new_goal).reshape((1, -1))
         if self._is_terminal(new_state[0, -1].item()):
-            disp_reward = -np.linalg.norm(net_displacement)
+            disp_reward = -np.linalg.norm(self.ant.get_position()[0, 1:2] - self.begin_pos)
             return new_state, new_goal, (disp_reward + self.final_reward), True
         else:
             return new_state, new_goal, self.per_step_reward, False

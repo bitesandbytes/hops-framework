@@ -10,20 +10,20 @@ from scipy.io import savemat
 from networks import create_actor, create_critic, create_emb_learner
 from turn_env import AntTurnEnv
 
-LEARNING_RATE = 0.01
-NUM_CONCURRENT = 32
+LEARNING_RATE = 0.05
+NUM_CONCURRENT = 64
 
 # global
-NUM_EPOCHS = 30
-NUM_EPISODES_PER_EPOCH = 3
+NUM_EPOCHS = 50
+NUM_EPISODES_PER_EPOCH = 2
 MAX_EPISODE_LEN = 10000
 RESET_TARGET_NETWORK_EPOCHS = 1
-MODEL_WEIGHTS_SUFFIX = "test0"
-SUMMARY_PREFIX = "test0"
+MODEL_WEIGHTS_SUFFIX = "test_smaller"
+SUMMARY_PREFIX = "test_smaller"
 
 # main params
-STATE_SIZE = 29
-EMB_SIZE = 40
+STATE_SIZE = 49
+EMB_SIZE = 100
 GOAL_SIZE = 1
 ACTION_SIZE = 23
 
@@ -31,7 +31,7 @@ ACTION_SIZE = 23
 VREP_PORT = 10000
 PER_STEP_REWARD = -0.01
 FINAL_REWARD = 10
-TOLERANCE = 0.05
+TOLERANCE = 0.03
 SPAWN_RADIUS = 6
 
 g = tf.Graph()
@@ -123,16 +123,17 @@ def _learner_thread(thread_id, session_global, graph_ops):
         num_goals_achieved = 0
 
         for epoch in range(0, NUM_EPOCHS):
-            cur_states = np.zeros((0, 29))
-            cur_goals = np.zeros((0, 1))
-            next_states = np.zeros((0, 29))
-            next_goals = np.zeros((0, 1))
-            actions = np.zeros((0, 23))
+            cur_states = np.zeros((0, STATE_SIZE))
+            cur_goals = np.zeros((0, GOAL_SIZE))
+            next_states = np.zeros((0, STATE_SIZE))
+            next_goals = np.zeros((0, GOAL_SIZE))
+            actions = np.zeros((0, ACTION_SIZE))
             rewards = np.zeros((0, 1))
             non_terminal = np.zeros((0, 1))
+	    episode = 0
 
-            for episode in range(0, NUM_EPISODES_PER_EPOCH):
-                rand_goal = np.random.uniform(-np.pi/2.0, +np.pi/2.0)
+	    while episode < NUM_EPISODES_PER_EPOCH:
+                rand_goal = np.random.uniform(-np.pi/12.0, +np.pi/12.0)
                 logger.info("START:epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
                 env.set_goal(rand_goal)
                 # cur_goal = randomly generated starting goal
@@ -146,8 +147,11 @@ def _learner_thread(thread_id, session_global, graph_ops):
                     emb = session.run(lembs, feed_dict={lstate: cur_state, lgoal: cur_goal}).reshape((1, -1))
                     action = session.run(lactor_action, feed_dict={lemb: emb})[0].reshape((1, -1))
                     # NOTE : adding a small random noise to system
-                    action += np.random.normal(loc=0.0, scale=0.2, size=action.shape)
+                    action += np.random.normal(loc=0.0, scale=0.05, size=action.shape)
                     next_state, next_goal, reward, has_ended = env.step(action)
+		    if has_ended and np.absolute(rand_goal) >= TOLERANCE and step_no < 2:
+			logger.info("skipping bad episode")
+			break
                     #logger.info("next_state:%s" % str(next_state))
                     cur_states = np.vstack((cur_states, cur_state))
                     next_states = np.vstack((next_states, next_state))
@@ -169,9 +173,14 @@ def _learner_thread(thread_id, session_global, graph_ops):
                     cur_state = next_state
                     cur_goal = next_goal
                 env.reset()
+		# don't learn anything if bad streaming from V-REP
+		if num_steps < 2 and np.absolute(rand_goal) >= TOLERANCE:
+		    #episode -= 1
+		    continue
                 thread_num_steps[thread_id, epoch, episode] = num_steps
                 thread_episodic_reward[thread_id, epoch, episode] = total_reward
                 logger.info("END:epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
+		episode += 1
             logger.info("preparing updates")
             # embed cur and next values
             cur_embs = session.run(lembs, feed_dict={lstate: cur_states, lgoal: cur_goals})
@@ -181,7 +190,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
             q_values = session.run(lq_values, feed_dict={lemb: next_embs, laction: actions}).reshape((-1, 1))
             # obtain targets for critic
             targets = rewards + gamma * np.multiply(non_terminal, q_values).reshape((-1, 1))
-
+		
             # compute full emb grads
             logger.info("EMB update")
             full_emb_grads = ae_full_grads([cur_states, cur_goals, cur_states, cur_goals])
@@ -309,7 +318,7 @@ def train(session, models, graph_ops):
 def main(_):
     logger = logging.getLogger("learner")
     logger.setLevel(logging.INFO)
-    fh = logging.FileHandler("log_file.txt")
+    fh = logging.FileHandler(SUMMARY_PREFIX+"log_file.txt")
     formatter = logging.Formatter("%(levelname)s:%(thread)d:%(filename)s:%(funcName)s:%(asctime)s::%(message)s")
     fh.setFormatter(formatter)
     logger.addHandler(fh)
@@ -317,6 +326,7 @@ def main(_):
     # g = tf.Graph()
     with g.as_default(), sess as session:
         K.set_session(session)
+	#K.set_learning_phase(0)
         models, graph_ops = setup_graph(STATE_SIZE, GOAL_SIZE, EMB_SIZE, ACTION_SIZE)
         # attempt to load params here
         try:
