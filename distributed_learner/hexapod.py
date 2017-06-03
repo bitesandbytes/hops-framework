@@ -139,16 +139,16 @@ class Ant(object):
     def get_joint_pos(self):
         jpos = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
-            _, jpos[handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
-                                                            vrep.simx_opmode_streaming)
+            _, jpos[0, handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
+                                                               vrep.simx_opmode_streaming)
         return jpos
 
     # Get joint velocities
     def get_joint_vel(self):
         jvel = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
-            _, jvel[handle_idx] = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
-                                                                   vrep.simx_opmode_streaming)
+            _, jvel[0, handle_idx] = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
+                                                                      vrep.simx_opmode_streaming)
         return jvel
 
     # returns euler orientation (alpha, beta, gamma) for the body

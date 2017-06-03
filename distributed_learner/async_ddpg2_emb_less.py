@@ -11,7 +11,7 @@ from networks import create_actor_with_goal, create_critic_with_goal
 from turn_env import AntTurnEnv
 
 LEARNING_RATE = 0.05
-NUM_CONCURRENT = 64
+NUM_CONCURRENT = 1
 
 # global
 NUM_EPOCHS = 50
@@ -19,8 +19,8 @@ NUM_EPISODES_PER_EPOCH = 2
 MAX_EPISODE_LEN = 10000
 NUM_DUMMY_STEPS = 50
 RESET_TARGET_NETWORK_EPOCHS = 1
-MODEL_WEIGHTS_SUFFIX = "emb_less0"
-SUMMARY_PREFIX = "emb_less0"
+MODEL_WEIGHTS_SUFFIX = "ff"
+SUMMARY_PREFIX = "ff"
 
 # main params
 STATE_SIZE = 46
@@ -127,7 +127,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
 
                 # run dummy steps to make sure V-REP streaming is ready
                 for step_no in range(0, NUM_DUMMY_STEPS):
-                    action = np.zeros((1, ACTION_SIZE))
+                    action = np.zeros(ACTION_SIZE + 5)
                     next_state, next_goal, reward, has_ended = env.step(action)
 
                 # V-REP streaming should now be ready
@@ -136,7 +136,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
                         (1, -1))
                     # NOTE : adding a small random noise to system
                     action += np.random.normal(loc=0.0, scale=0.05, size=action.shape)
-                    next_state, next_goal, reward, has_ended = env.step(np.hstack((action, np.zeros(1, 5))))
+                    next_state, next_goal, reward, has_ended = env.step(np.hstack((action.reshape((-1,)), np.zeros(5))))
                     if has_ended and np.absolute(rand_goal) >= TOLERANCE and step_no < 2:
                         logger.info("skipping bad episode")
                     break
