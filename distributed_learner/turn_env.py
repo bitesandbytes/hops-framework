@@ -26,17 +26,26 @@ class AntTurnEnv(object):
         self.server_ip, self.server_port = args['server_ip'], args['server_port']
         self.spawn_radius = args['spawn_radius']
         self.begin_pos = None
-        self.goal = None
+        self.goal = 0
 
     def set_goal(self, delta_theta):
         self.delta_theta = delta_theta
 
+    def reset_goal(self, delta_theta):
+        self.delta_theta = delta_theta
+        goal = self.ant.get_orientation()[0, -1].item() + self.delta_theta
+        if goal > np.pi:
+            goal -= 2 * np.pi
+        elif goal < -np.pi:
+            goal += 2 * np.pi
+        self.goal = goal
+
     def start(self):
-        logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
+        # logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
         state = np.hstack((self.ant.get_joint_pos(), self.ant.get_joint_vel()))
         orient = self.ant.get_orientation()
-        begin_angle = self.ant.start_orientation[0, -1].item()
-        self.begin_pos = self.ant.start_pos[0, 1:3]
+        begin_angle = orient[0, -1].item()
+        self.begin_pos = self.ant.get_position()[0, 1:3]
         self.goal = begin_angle + self.delta_theta
         if self.goal > np.pi:
             self.goal -= 2 * np.pi
@@ -48,6 +57,8 @@ class AntTurnEnv(object):
         diff = np.absolute(current - self.goal)
         if diff > np.pi:
             diff -= 2 * np.pi
+        if diff < -np.pi:
+            diff += 2 * np.pi
         if diff < self.tolerance:
             return True
         else:
@@ -58,9 +69,12 @@ class AntTurnEnv(object):
         self.ant.set_forces_and_trigger(action)
         new_state = np.hstack((self.ant.get_joint_pos(), self.ant.get_joint_vel()))
         new_orient = self.ant.get_orientation()
+        #logging.getLogger("learner").info("goal:%0.4f, cur:%0.4f" % (self.goal, new_orient[0, -1].item()))
         new_goal = self.goal - new_orient[0, -1].item()
         if new_goal > np.pi:
             new_goal -= 2 * np.pi
+        elif new_goal < -np.pi:
+            new_goal += 2 * np.pi
         new_goal = np.asarray(new_goal).reshape((1, -1))
         if self._is_terminal(new_orient[0, -1].item()):
             disp_reward = -np.linalg.norm(self.ant.get_position()[0, 1:2] - self.begin_pos)

@@ -92,43 +92,19 @@ class Ant(object):
                         Ant_neckJoint1, Ant_neckJoint2, Ant_neckJoint3, Ant_leftJawJoint, Ant_rightJawJoint]
 
         self.joint_count = len(self.handles)
+        self.signal_values()
+        self.wait_till_stream()
 
         # log these for consistency
-        self.start_pos = self._get_position()
-        self.start_orientation = self._get_orientation()
-        pos = self.get_position()
-        ori = self.get_orientation()
-        jpos = self.get_joint_pos()
-        jvel = self.get_joint_vel()
-        '''
-        correct = False
-        while not correct:
-            correct = True
-            if np.all(self.start_pos == 0):
-                correct = False
-            if np.all(self.start_orientation == 0):
-                correct = False
-            if np.all(jpos == 0):
-                correct = False
-            time.sleep(0.1)
-        logging.getLogger("learner").info("started sim")
-        
-        # Configure them to have almost infinite target velocity
-        # Use only if in pure Force/Torque mode without position control (PID)
-        _ = vrep.simxPauseCommunication(self.client_id, True);
-        for joint_handle in self.handles:
-            _ = vrep.simxSetJointTargetVelocity(self.client_id, joint_handle, 9999.0, vrep.simx_opmode_blocking)
-        _ = vrep.simxPauseCommunication(self.client_id, False);
-        '''
+        self.start_pos = self.get_position()
+        self.start_orientation = self.get_orientation()
 
     # force_vec = [Ant_joint{1-3}Leg{1-6}, Ant_neckJoint{1-3}, Ant_leftJawJoint, Ant_rightJawJoint]
     def set_forces(self, force_vec):
         forces = force_vec.flatten().tolist()
-        _ = vrep.simxPauseCommunication(self.client_id, True)
         for handle_idx in range(0, self.joint_count):
             _ = vrep.simxSetJointForce(self.client_id, self.handles[handle_idx], forces[handle_idx],
                                        vrep.simx_opmode_oneshot)
-        _ = vrep.simxPauseCommunication(self.client_id, False)
 
     # set force_vec and trigger simulation step
     def set_forces_and_trigger(self, force_vec):
@@ -140,7 +116,7 @@ class Ant(object):
         jpos = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
             _, jpos[0, handle_idx] = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx],
-                                                               vrep.simx_opmode_streaming)
+                                                               vrep.simx_opmode_buffer)
         return jpos
 
     # Get joint velocities
@@ -148,28 +124,18 @@ class Ant(object):
         jvel = np.zeros((1, self.joint_count))
         for handle_idx in range(0, self.joint_count):
             _, jvel[0, handle_idx] = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
-                                                                      vrep.simx_opmode_streaming)
+                                                                      vrep.simx_opmode_buffer)
         return jvel
 
     # returns euler orientation (alpha, beta, gamma) for the body
     def get_orientation(self):
         _, euler_angles = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1,
-                                                        vrep.simx_opmode_streaming)
+                                                        vrep.simx_opmode_buffer)
         return np.asarray((euler_angles[0], euler_angles[1], euler_angles[2])).reshape((1, -1))
 
     # returns Cartesian coordinates (x,y,z) for the body
     def get_position(self):
-        _, position = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
-        return np.asarray((position[0], position[1], position[2])).reshape((1, -1))
-
-    # copy functions using blocking mode instead of streaming to get correct values
-    def _get_orientation(self):
-        _, euler_angles = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_blocking)
-        return np.asarray((euler_angles[0], euler_angles[1], euler_angles[2])).reshape((1, -1))
-
-    # returns Cartesian coordinates (x,y,z) for the body
-    def _get_position(self):
-        _, position = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_blocking)
+        _, position = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_buffer)
         return np.asarray((position[0], position[1], position[2])).reshape((1, -1))
 
     # set (x,y) position and rotation about z-axis
@@ -193,6 +159,33 @@ class Ant(object):
         _ = vrep.simxSetFloatingParameter(self.client_id, vrep.sim_floatparam_simulation_time_step, custom_dt,
                                           vrep.simx_opmode_blocking)
 
+    def signal_values(self):
+        vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
+        vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
+        for handle_idx in range(0, self.joint_count):
+            vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012, vrep.simx_opmode_streaming)
+        for handle_idx in range(0, self.joint_count):
+            vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_streaming)
+
+    def wait_till_stream(self):
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_buffer)
+
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_buffer)
+
+        for handle_idx in range(0, self.joint_count):
+            ret = vrep.simx_return_illegal_opmode_flag
+            while ret != vrep.simx_return_ok:
+                ret, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.handles[handle_idx], 2012,
+                                                          vrep.simx_opmode_buffer)
+        for handle_idx in range(0, self.joint_count):
+            ret = vrep.simx_return_illegal_opmode_flag
+            while ret != vrep.simx_return_ok:
+                ret, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_buffer)
+
     def start_simulation(self):
         # Start simulation
         e = vrep.simxStartSimulation(self.client_id, vrep.simx_opmode_blocking)
@@ -204,28 +197,18 @@ class Ant(object):
         self.logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
         self.logger.info("Ping time: %f" % (sec + msec / 1000.0))
 
+        # block till stream
+        self.signal_values()
+        self.wait_till_stream()
+
         # required
-        self.start_pos = self._get_position()
-        self.start_orientation = self._get_orientation()
-        jpos = self.get_joint_pos()
-        jvel = self.get_joint_vel()
-        '''
-        correct = False
-        while not correct:
-            correct = True
-            if np.all(self.start_pos == 0):
-                correct = False
-            if np.all(self.start_orientation == 0):
-                correct = False
-            if np.all(jpos == 0):
-                correct = False
-            time.sleep(0.1)
-        logging.getLogger("learner").info("started sim")
-        '''
+        self.start_pos = self.get_position()
+        self.start_orientation = self.get_orientation()
 
     def stop_simulation(self):
         # issue command to stop simulation
         vrep.simxStopSimulation(self.client_id, vrep.simx_opmode_blocking)
+        '''
         # stop all streaming
         for handle_idx in range(0, self.joint_count):
             _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_discontinue)
@@ -237,5 +220,6 @@ class Ant(object):
         _, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         # Just to make sure this gets executed
+        '''
         vrep.simxGetPingTime(self.client_id)
         self.logger.info("simulation stopped")

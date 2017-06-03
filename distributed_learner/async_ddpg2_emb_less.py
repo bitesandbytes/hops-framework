@@ -16,8 +16,8 @@ NUM_CONCURRENT = 1
 # global
 NUM_EPOCHS = 50
 NUM_EPISODES_PER_EPOCH = 2
-MAX_EPISODE_LEN = 10000
-NUM_DUMMY_STEPS = 50
+MAX_EPISODE_LEN = 10
+NUM_DUMMY_STEPS = 5
 RESET_TARGET_NETWORK_EPOCHS = 1
 MODEL_WEIGHTS_SUFFIX = "ff"
 SUMMARY_PREFIX = "ff"
@@ -71,7 +71,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
         laction = tf.placeholder(tf.float32, [None, ACTION_SIZE])
 
         lactor, lact_grad, lactor_grads = create_actor_with_goal(STATE_SIZE, GOAL_SIZE, ACTION_SIZE)
-        lcritic, l_action_grads = create_critic_with_goal(STATE_SIZE, ACTION_SIZE, ACTION_SIZE)
+        lcritic, l_action_grads = create_critic_with_goal(STATE_SIZE, GOAL_SIZE, ACTION_SIZE)
 
         # basics
         lq_values = lcritic([lstate, lgoal, laction])
@@ -114,22 +114,16 @@ def _learner_thread(thread_id, session_global, graph_ops):
             episode = 0
 
             while episode < NUM_EPISODES_PER_EPOCH:
-                rand_goal = np.random.uniform(-np.pi / 12.0, +np.pi / 12.0)
-                logger.info("START:epoch:%d, episode:%d, goal:%f" % (epoch, episode, rand_goal))
-                env.set_goal(rand_goal)
                 # cur_goal = randomly generated starting goal
+                rand_goal = np.random.uniform(-np.pi / 12.0, +np.pi / 12.0)
+                env.set_goal(rand_goal)
                 cur_state, cur_goal = env.start()
-                # logger.info("cur_state:%s" % str(cur_state))
                 thread_goals[thread_id, epoch, episode] = cur_goal
                 next_state, next_goal = cur_state, cur_goal
                 num_steps = 0
                 total_reward = 0
 
-                # run dummy steps to make sure V-REP streaming is ready
-                for step_no in range(0, NUM_DUMMY_STEPS):
-                    action = np.zeros(ACTION_SIZE + 5)
-                    next_state, next_goal, reward, has_ended = env.step(action)
-
+                logger.info("START:epoch:%d, episode:%d, goal:%f" % (epoch, episode, cur_goal))
                 # V-REP streaming should now be ready
                 for step_no in range(0, MAX_EPISODE_LEN):
                     action = session.run(lactor_action, feed_dict={lstate: cur_state, lgoal: cur_goal})[0].reshape(
@@ -139,8 +133,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
                     next_state, next_goal, reward, has_ended = env.step(np.hstack((action.reshape((-1,)), np.zeros(5))))
                     if has_ended and np.absolute(rand_goal) >= TOLERANCE and step_no < 2:
                         logger.info("skipping bad episode")
-                    break
-
+                        break
                     cur_states = np.vstack((cur_states, cur_state))
                     next_states = np.vstack((next_states, next_state))
                     cur_goals = np.vstack((cur_goals, cur_goal))
