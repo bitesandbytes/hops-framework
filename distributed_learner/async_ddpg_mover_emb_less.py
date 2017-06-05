@@ -11,15 +11,15 @@ from networks_mover import create_actor_with_goal, create_critic_with_goal
 from turn_env import MoverTurnEnv
 
 LEARNING_RATE = 0.001
-NUM_CONCURRENT = 1
+NUM_CONCURRENT = 64
 
 # global
 NUM_EPOCHS = 1000
 NUM_EPISODES_PER_EPOCH = 4
 MAX_EPISODE_LEN = 5000
 RESET_TARGET_NETWORK_EPOCHS = 2
-MODEL_WEIGHTS_SUFFIX = "mv_t0"
-SUMMARY_PREFIX = "mv_t0"
+MODEL_WEIGHTS_SUFFIX = "mv_t1"
+SUMMARY_PREFIX = "mv_t1"
 
 # main params
 STATE_SIZE = 4
@@ -32,10 +32,11 @@ VREP_PORT = 10000
 PER_STEP_REWARD = -0.01
 FINAL_REWARD = 10
 TOLERANCE = 0.03  # roughly 2 degrees
-SPAWN_RADIUS = 6
+SPAWN_RADIUS = 4
 
 g = tf.Graph()
 sess = tf.Session()
+global_lock = threading.Lock()
 
 thread_critic_loss = np.zeros((NUM_CONCURRENT, NUM_EPOCHS))
 thread_goals_achieved = np.zeros((NUM_CONCURRENT, NUM_EPOCHS))
@@ -114,7 +115,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
 
             for episode in range(0, NUM_EPISODES_PER_EPOCH):
                 # cur_goal = randomly generated starting goal
-                rand_goal = np.random.uniform(-np.pi / 6.0, +np.pi / 6.0)
+                rand_goal = np.random.uniform(-np.pi / 3.0, +np.pi / 3.0)
                 env.set_goal(rand_goal)
                 cur_state, cur_goal = env.start()
                 thread_goals[thread_id, epoch, episode] = cur_goal
@@ -165,6 +166,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
             # compute full actor and critic grads
             # actor update
             # logger.info("ACTOR update")
+            global_lock.acquire()
             local_action_grads = l_grad_Q_wrt_a([cur_states, cur_goals, actions])[0]
             full_local_actor_grads = l_actor_full_grads([cur_states, cur_goals, local_action_grads])
             graph_ops["actor_grad_copy"](full_local_actor_grads)
@@ -175,13 +177,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
             full_local_critic_grads = l_critic_full_grads([cur_states, cur_goals, actions, targets])
             graph_ops["critic_grad_copy"](full_local_critic_grads)
             session_global.run(graph_ops["critic_grad_apply"])
-
-            # update params from server
-            logger.info("RESET TARGET NETWORK PARAMS")
-            local_params = [session_global.run(param) for param in actor_params]
-            lactor_set_params(local_params)
-            local_params = [session_global.run(param) for param in critic_params]
-            lcritic_set_params(local_params)
+            global_lock.release()
 
             # compute losses for summary
             thread_critic_loss[thread_id, epoch] = session.run(critic_loss, feed_dict={lstate: cur_states,
@@ -194,10 +190,12 @@ def _learner_thread(thread_id, session_global, graph_ops):
             # if out of sync, re-sync target networks with server
             if np.mod(epoch, RESET_TARGET_NETWORK_EPOCHS) == 0:
                 logger.info("RESET TARGET NETWORK PARAMS")
+                global_lock.acquire()
                 local_params = [session_global.run(param) for param in actor_params]
                 lactor_set_params(local_params)
                 local_params = [session_global.run(param) for param in critic_params]
                 lcritic_set_params(local_params)
+                global_lock.release()
 
     logger.info("EXITING THREAD:%d" % thread_id)
 

@@ -108,13 +108,10 @@ class Mover(object):
     def set_position_and_rotation(self, position, rotation):
         # time.sleep(0.2)
         empty_buff = bytearray()
-        print('ori' + str(self.start_orientation))
         # self.start_pos = self.get_position()
         # self.start_orientation = self.get_orientation()
-        print('pos' + str(self.start_pos))
         args = [position[0].item(), position[1].item(), self.start_pos[0, 2].item(), rotation]
         # self.logger.info("args:%s" % str(args))
-        print(str(args))
         emptyBuff = bytearray()
         res, ret_ints, ret_floats, ret_strings, ret_buffer = vrep.simxCallScriptFunction(self.client_id, 'main',
                                                                                          vrep.sim_scripttype_childscript,

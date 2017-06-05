@@ -150,7 +150,7 @@ class MoverTurnEnv(object):
             return False
 
     def step(self, action):
-        logging.getLogger("learner").info("stepping")
+        # logging.getLogger("learner").info("stepping")
         self.mover.set_target_vel(action)
         new_state = np.hstack((self.mover.get_joint_pos(), self.mover.get_joint_vel()))
         new_orient = self.mover.get_orientation()
@@ -163,7 +163,7 @@ class MoverTurnEnv(object):
         pos = self.mover.get_position()
         # if out of bounds, end with negative reward
         if abs(pos[0, 0]) > 12 or abs(pos[0, 1]) > 12:
-            return new_state, new_goal, -40, True
+            return new_state, new_goal, -10, True
         # logging.getLogger("learner").info("goal:%0.4f, cur:%0.4f" % (self.goal, new_orient[0, -1].item()))
         if self._is_terminal(new_orient[0, -1].item()):
             disp_reward = -np.linalg.norm(self.mover.get_position()[0, 1:2] - self.begin_pos)
