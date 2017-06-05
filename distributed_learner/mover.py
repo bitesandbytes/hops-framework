@@ -52,10 +52,10 @@ class Mover(object):
         sec, msec = vrep.simxGetPingTime(self.client_id)
         self.logger.info("Started simulation on %s:%d" % (self.server_ip, self.server_port))
         self.logger.info("Ping time: %f" % (sec + msec / 1000.0))
-        _, self.reference = vrep.simxGetObjectHandle(self.client_id, 'ResizableFloor_5_25', vrep.simx_opmode_blocking)
+        # _, self.reference = vrep.simxGetObjectHandle(self.client_id, 'ResizableFloor_5_25', vrep.simx_opmode_blocking)
 
         # Obtain handle for body (for orientation, positions etc)
-        _, self.body_handle = vrep.simxGetObjectHandle(self.client_id, 'main', vrep.simx_opmode_blocking)
+        _, self.body_handle = vrep.simxGetObjectHandle(self.client_id, 'dr12_body_', vrep.simx_opmode_blocking)
 
         # Obtain joint handles
         _, self.left_joint = vrep.simxGetObjectHandle(self.client_id, 'dr12_leftJoint_', vrep.simx_opmode_blocking)
@@ -70,7 +70,7 @@ class Mover(object):
 
         # log these for consistency
         self.start_pos = self.get_position()
-        self.start_orientation = self.get_orientation()
+        self.start_orientation = self.get_orientation()[0, -1]
 
     def set_target_vel(self, vel_vec):
         _ = vrep.simxSetJointTargetVelocity(self.client_id, self.left_joint, vel_vec[0].item(),
@@ -97,6 +97,7 @@ class Mover(object):
     # returns euler orientation (alpha, beta, gamma) for the body
     def get_orientation(self):
         _, euler_angles = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_buffer)
+        # self.logger.info("orient:%s"%str(euler_angles))
         return np.asarray((euler_angles[0], euler_angles[1], euler_angles[2])).reshape((1, -1))
 
     # returns Cartesian coordinates (x,y,z) for the body
@@ -118,6 +119,8 @@ class Mover(object):
                                                                                          'resetScene', [], args, [],
                                                                                          empty_buff,
                                                                                          vrep.simx_opmode_blocking)
+        self.start_pos[0, 0:2] = np.asarray(ret_floats[0:2]).reshape((1, -1))
+        self.start_orientation = ret_floats[2]
         if res != vrep.simx_return_ok:
             self.logger.critical("failed to set position and orientation")
 
@@ -127,17 +130,31 @@ class Mover(object):
                                           vrep.simx_opmode_blocking)
 
     def signal_values(self):
-        vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
-        vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
-        _, _ = vrep.simxGetJointPosition(self.client_id, self.left_joint, vrep.simx_opmode_streaming)
-        _, _ = vrep.simxGetJointPosition(self.client_id, self.right_joint, vrep.simx_opmode_streaming)
-        _, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.left_joint, 2012, vrep.simx_opmode_streaming)
-        _, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.right_joint, 2012, vrep.simx_opmode_streaming)
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_streaming)
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetJointPosition(self.client_id, self.left_joint, vrep.simx_opmode_streaming)
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetJointPosition(self.client_id, self.right_joint, vrep.simx_opmode_streaming)
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.left_joint, 2012, vrep.simx_opmode_streaming)
+        ret = vrep.simx_return_illegal_opmode_flag
+        while ret != vrep.simx_return_ok:
+            ret, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.right_joint, 2012,
+                                                      vrep.simx_opmode_streaming)
 
     def wait_till_stream(self):
         ret = vrep.simx_return_illegal_opmode_flag
         while ret != vrep.simx_return_ok:
-            ret, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_buffer)
+            ret, ori = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_buffer)
+            self.logger.info("orient:%s" % str(ori))
 
         ret = vrep.simx_return_illegal_opmode_flag
         while ret != vrep.simx_return_ok:
@@ -175,19 +192,21 @@ class Mover(object):
         self.wait_till_stream()
 
         # required
-        self.start_pos = self.get_position()
-        self.start_orientation = self.get_orientation()
+        # self.start_pos = self.get_position()
+        # self.start_orientation = self.get_orientation()
 
     def stop_simulation(self):
         # issue command to stop simulation
         vrep.simxStopSimulation(self.client_id, vrep.simx_opmode_blocking)
         # stop all streaming
+        '''
         vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetJointPosition(self.client_id, self.left_joint, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetJointPosition(self.client_id, self.right_joint, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.left_joint, 2012, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectFloatParameter(self.client_id, self.right_joint, 2012, vrep.simx_opmode_discontinue)
+        '''
         # Just to make sure this gets executed
         vrep.simxGetPingTime(self.client_id)
         self.logger.info("simulation stopped")

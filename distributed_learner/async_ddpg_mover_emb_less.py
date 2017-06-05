@@ -11,12 +11,12 @@ from networks_mover import create_actor_with_goal, create_critic_with_goal
 from turn_env import MoverTurnEnv
 
 LEARNING_RATE = 0.001
-NUM_CONCURRENT = 64
+NUM_CONCURRENT = 1
 
 # global
 NUM_EPOCHS = 1000
 NUM_EPISODES_PER_EPOCH = 4
-MAX_EPISODE_LEN = 5000
+MAX_EPISODE_LEN = 50
 RESET_TARGET_NETWORK_EPOCHS = 2
 MODEL_WEIGHTS_SUFFIX = "mv_t1"
 SUMMARY_PREFIX = "mv_t1"

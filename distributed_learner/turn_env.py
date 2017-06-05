@@ -128,9 +128,8 @@ class MoverTurnEnv(object):
     def start(self):
         # logging.getLogger("learner").info("ENV::START:goal:%f" % self.delta_theta)
         state = np.hstack((self.mover.get_joint_pos(), self.mover.get_joint_vel()))
-        orient = self.mover.get_orientation()
-        begin_angle = orient[0, -1].item()
-        self.begin_pos = self.mover.get_position()[0, 1:3]
+        begin_angle = self.mover.start_orientation
+        self.begin_pos = self.mover.start_pos
         self.goal = begin_angle + self.delta_theta
         if self.goal > np.pi:
             self.goal -= 2 * np.pi
@@ -149,6 +148,9 @@ class MoverTurnEnv(object):
         else:
             return False
 
+    def get_state(self):
+        return np.hstack((self.mover.get_joint_pos(), self.mover.get_joint_vel()))
+
     def step(self, action):
         # logging.getLogger("learner").info("stepping")
         self.mover.set_target_vel(action)
@@ -165,7 +167,7 @@ class MoverTurnEnv(object):
         if abs(pos[0, 0]) > 12 or abs(pos[0, 1]) > 12:
             return new_state, new_goal, -10, True
         # logging.getLogger("learner").info("goal:%0.4f, cur:%0.4f" % (self.goal, new_orient[0, -1].item()))
-        if self._is_terminal(new_orient[0, -1].item()):
+        if abs(new_goal) < self.tolerance:
             disp_reward = -np.linalg.norm(self.mover.get_position()[0, 1:2] - self.begin_pos)
             vel_reward = -np.linalg.norm(new_state[0, 23:])
             return new_state, new_goal, (vel_reward + disp_reward + self.final_reward), True
@@ -174,6 +176,7 @@ class MoverTurnEnv(object):
 
     def reset(self):
         logging.getLogger("learner").info("ENV::RESET")
+        self.mover.set_target_vel(np.zeros(2))
         self.mover.stop_simulation()
         time.sleep(0.5)
         self.mover.start_simulation()
