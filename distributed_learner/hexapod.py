@@ -208,7 +208,6 @@ class Ant(object):
     def stop_simulation(self):
         # issue command to stop simulation
         vrep.simxStopSimulation(self.client_id, vrep.simx_opmode_blocking)
-        '''
         # stop all streaming
         for handle_idx in range(0, self.joint_count):
             _, _ = vrep.simxGetJointPosition(self.client_id, self.handles[handle_idx], vrep.simx_opmode_discontinue)
@@ -220,6 +219,5 @@ class Ant(object):
         _, _ = vrep.simxGetObjectPosition(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         _, _ = vrep.simxGetObjectOrientation(self.client_id, self.body_handle, -1, vrep.simx_opmode_discontinue)
         # Just to make sure this gets executed
-        '''
         vrep.simxGetPingTime(self.client_id)
         self.logger.info("simulation stopped")

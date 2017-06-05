@@ -7,25 +7,25 @@ import keras.backend as K
 import tensorflow as tf
 from scipy.io import savemat
 
-from networks import create_actor_with_goal, create_critic_with_goal
-from turn_env import AntTurnEnv
+from networks_mover import create_actor_with_goal, create_critic_with_goal
+from turn_env import MoverTurnEnv
 
-LEARNING_RATE = 0.01
-NUM_CONCURRENT = 4
+LEARNING_RATE = 0.001
+NUM_CONCURRENT = 1
 
 # global
-NUM_EPOCHS = 100
-NUM_EPISODES_PER_EPOCH = 2
-NUM_UPDATES_PER_EPOCH = 1
-MAX_EPISODE_LEN = 10
-RESET_TARGET_NETWORK_EPOCHS = 1
-MODEL_WEIGHTS_SUFFIX = "el2"
-SUMMARY_PREFIX = "el2"
+NUM_EPOCHS = 1000
+NUM_EPISODES_PER_EPOCH = 4
+MAX_EPISODE_LEN = 5000
+RESET_TARGET_NETWORK_EPOCHS = 2
+MODEL_WEIGHTS_SUFFIX = "mv_t0"
+SUMMARY_PREFIX = "mv_t0"
 
 # main params
-STATE_SIZE = 46
+STATE_SIZE = 4
 GOAL_SIZE = 1
-ACTION_SIZE = 18
+ACTION_SIZE = 2
+ACTION_SCALE = 16
 
 # env
 VREP_PORT = 10000
@@ -52,7 +52,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
     actor_params = graph_ops["actor_params"]
     critic_params = graph_ops["critic_params"]
 
-    env = AntTurnEnv({
+    env = MoverTurnEnv({
         'server_ip': '127.0.0.1',
         'server_port': VREP_PORT + thread_id,
         'vrep_exec_path': None,
@@ -65,7 +65,6 @@ def _learner_thread(thread_id, session_global, graph_ops):
 
     gamma = 0.99
     with tf.Graph().as_default(), tf.Session() as session:
-        # make local networks
         lstate = tf.placeholder(tf.float32, [None, STATE_SIZE])
         lgoal = tf.placeholder(tf.float32, [None, GOAL_SIZE])
         laction = tf.placeholder(tf.float32, [None, ACTION_SIZE])
@@ -111,11 +110,11 @@ def _learner_thread(thread_id, session_global, graph_ops):
             actions = np.zeros((0, ACTION_SIZE))
             rewards = np.zeros((0, 1))
             non_terminal = np.zeros((0, 1))
-            episode = 0
+            # episode = 0
 
             for episode in range(0, NUM_EPISODES_PER_EPOCH):
                 # cur_goal = randomly generated starting goal
-                rand_goal = np.random.uniform(-np.pi / 12.0, +np.pi / 12.0)
+                rand_goal = np.random.uniform(-np.pi / 6.0, +np.pi / 6.0)
                 env.set_goal(rand_goal)
                 cur_state, cur_goal = env.start()
                 thread_goals[thread_id, epoch, episode] = cur_goal
@@ -130,7 +129,7 @@ def _learner_thread(thread_id, session_global, graph_ops):
                         (1, -1))
                     # NOTE : adding a small random noise to system
                     action += np.random.normal(loc=0.0, scale=0.05, size=action.shape)
-                    next_state, next_goal, reward, has_ended = env.step(np.hstack((action.reshape((-1,)), np.zeros(5))))
+                    next_state, next_goal, reward, has_ended = env.step(ACTION_SCALE * action.reshape((-1,)))
                     cur_states = np.vstack((cur_states, cur_state))
                     next_states = np.vstack((next_states, next_state))
                     cur_goals = np.vstack((cur_goals, cur_goal))
@@ -155,36 +154,34 @@ def _learner_thread(thread_id, session_global, graph_ops):
                 thread_episodic_reward[thread_id, epoch, episode] = total_reward
                 logger.info("END:epoch:%d, episode:%d, goal:%f, num_steps:%d" % (epoch, episode, rand_goal, num_steps))
 
-            logger.info("preparing updates")
-            for update_no in range(0, NUM_UPDATES_PER_EPOCH):
-                # obtain critic q-values
-                logger.info("update:%d" % update_no)
-                q_values = session.run(lq_values,
-                                       feed_dict={lstate: next_states, lgoal: next_goals, laction: actions}).reshape(
-                    (-1, 1))
-                # obtain targets for critic
-                targets = rewards + gamma * np.multiply(non_terminal, q_values).reshape((-1, 1))
+            logger.info("Updating")
+            # obtain critic q-values
+            q_values = session.run(lq_values,
+                                   feed_dict={lstate: next_states, lgoal: next_goals, laction: actions}).reshape(
+                (-1, 1))
+            # obtain targets for critic
+            targets = rewards + gamma * np.multiply(non_terminal, q_values).reshape((-1, 1))
 
-                # compute full actor and critic grads
-                # actor update
-                # logger.info("ACTOR update")
-                local_action_grads = l_grad_Q_wrt_a([cur_states, cur_goals, actions])[0]
-                full_local_actor_grads = l_actor_full_grads([cur_states, cur_goals, local_action_grads])
-                graph_ops["actor_grad_copy"](full_local_actor_grads)
-                session_global.run(graph_ops["actor_grad_apply"])
+            # compute full actor and critic grads
+            # actor update
+            # logger.info("ACTOR update")
+            local_action_grads = l_grad_Q_wrt_a([cur_states, cur_goals, actions])[0]
+            full_local_actor_grads = l_actor_full_grads([cur_states, cur_goals, local_action_grads])
+            graph_ops["actor_grad_copy"](full_local_actor_grads)
+            session_global.run(graph_ops["actor_grad_apply"])
 
-                # critic update
-                # logger.info("CRITIC update")
-                full_local_critic_grads = l_critic_full_grads([cur_states, cur_goals, actions, targets])
-                graph_ops["critic_grad_copy"](full_local_critic_grads)
-                session_global.run(graph_ops["critic_grad_apply"])
+            # critic update
+            # logger.info("CRITIC update")
+            full_local_critic_grads = l_critic_full_grads([cur_states, cur_goals, actions, targets])
+            graph_ops["critic_grad_copy"](full_local_critic_grads)
+            session_global.run(graph_ops["critic_grad_apply"])
 
-                # update params from server
-                logger.info("RESET TARGET NETWORK PARAMS")
-                local_params = [session_global.run(param) for param in actor_params]
-                lactor_set_params(local_params)
-                local_params = [session_global.run(param) for param in critic_params]
-                lcritic_set_params(local_params)
+            # update params from server
+            logger.info("RESET TARGET NETWORK PARAMS")
+            local_params = [session_global.run(param) for param in actor_params]
+            lactor_set_params(local_params)
+            local_params = [session_global.run(param) for param in critic_params]
+            lcritic_set_params(local_params)
 
             # compute losses for summary
             thread_critic_loss[thread_id, epoch] = session.run(critic_loss, feed_dict={lstate: cur_states,
